@@ -1,0 +1,6 @@
+name: s2s2net
+channels:
+  - conda-forge
+dependencies:
+  - conda-forge::jupyterlab=3.2.9
+  - conda-forge::python=3.9.10
