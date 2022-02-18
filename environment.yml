@@ -7,4 +7,5 @@ dependencies:
   - conda-forge::python=3.9.10
   - conda-forge::pytorch=1.10.0
   - conda-forge::pytorch-lightning=1.5.10
+  - conda-forge::rioxarray=0.10.1
   - conda-forge::torchgeo=0.2.0
