@@ -66,7 +66,9 @@ assert len(hres_s2_dict) <= len(df)
 # %%
 # Ensure pixel coordinates are aligned between
 # Sentinel 2 and reprojected High Resolution imagery
-def align_lowres_highres_pair(img_highres: xr.DataArray, img_lowres: xr.DataArray):
+def align_lowres_highres_pair(
+    img_highres: xr.DataArray, img_lowres: xr.DataArray
+) -> (xr.DataArray, xr.DataArray):
     """
     Create low resolution and high resolution satellite image pairs.
     Does cropping and alignment of the pixel corners so that both images cover
@@ -148,83 +150,98 @@ j: int = 0
 for maskname in tqdm.tqdm(hres_s2_dict.keys()):
     # Get High Resolution (Quickbird/Worldview) image mask
     # maskname: str = row.hres_filename
-    highresmask: xr.DataArray = rioxarray.open_rasterio(
-        filename=os.path.join("Nov_2021", maskname), lock=False
+    hresname: str = (
+        maskname.replace("_DL_", "")
+        .replace("mask_pp.tif", ".tif")
+        .replace("_mask.tif", ".tif")
+        .replace("_.tif", ".tif")
     )
-    hresname: str = maskname.replace("_DL_", "").replace("mask_pp.tif", ".tif")
-    highresimg: xr.DataArray = rioxarray.open_rasterio(
-        filename=os.path.join("imagery", hresname), lock=False
-    )
+    with (
+        rioxarray.open_rasterio(
+            filename=os.path.join("Nov_2021", maskname), lock=False
+        ) as highresmask,
+        rioxarray.open_rasterio(
+            filename=os.path.join("imagery", hresname), lock=False
+        ) as highresimg,
+    ):
 
-    # Get corresponding Sentinel 2 10m resolution input image(s)
-    pathnames: list = hres_s2_dict[maskname]
-    for pathname in pathnames:
-        filenames: list = glob.glob(pathname=pathname)
+        # Get corresponding Sentinel 2 10m resolution input image(s)
+        pathnames: list = hres_s2_dict[maskname]
+        for pathname in pathnames:
+            filenames: list = glob.glob(pathname=pathname)
 
-        objs: list = []
-        for filename in sorted(filenames):
-            if filename.endswith(("B08.tif", "B04.tif", "B03.tif", "B02.tif")):
-                band: str = filename[-6:-4]
-                da: xr.DataArray = rioxarray.open_rasterio(
-                    filename=filename, lock=False
+            objs: list = []
+            for filename in sorted(filenames):
+                if filename.endswith(("B08.tif", "B04.tif", "B03.tif", "B02.tif")):
+                    band: str = filename[-6:-4]
+                    da: xr.DataArray = rioxarray.open_rasterio(
+                        filename=filename, lock=False
+                    )
+                    da["band"] = int(band) * da.band
+                    objs.append(da)
+            sentinel2img: xr.DataArray = xr.concat(objs=objs, dim="band")
+
+            # Reproject HighRes image mask to match projection of Sentinel 2 image
+            # https://corteva.github.io/rioxarray/latest/examples/reproject_match.html
+            highresimg_reprojected: xr.DataArray = highresimg.rio.reproject(
+                dst_crs=sentinel2img.rio.crs
+            )
+            _highresmask = highresmask.astype(np.float32)
+            _highresmask.rio.set_nodata(input_nodata=np.nan, inplace=True)
+            _highresmask_reprojected: xr.DataArray = _highresmask.rio.reproject(
+                dst_crs=sentinel2img.rio.crs
+            )
+            highresmask_reprojected: xr.DataArray = _highresmask_reprojected.where(
+                cond=highresimg_reprojected.sum(dim="band")
+                != 0
+                # Turn areas with no optical imagery into NaN in the mask too
+            )
+
+            # Stack the mask as an extra channel to the RGB-NIR highres image
+            highresimgmask_reprojected: xr.DataArray = xr.concat(
+                objs=[highresimg_reprojected, highresmask_reprojected], dim="band"
+            )
+
+            try:
+                assert highresimgmask_reprojected.dtype == np.float32
+            except AssertionError:
+                highresimgmask_reprojected: xr.DataArray = (
+                    highresimgmask_reprojected.astype(dtype=np.float32)
                 )
-                da["band"] = int(band) * da.band
-                objs.append(da)
-        sentinel2img: xr.DataArray = xr.concat(objs=objs, dim="band")
 
-        # Reproject HighRes image mask to match projection of Sentinel 2 image
-        # https://corteva.github.io/rioxarray/latest/examples/reproject_match.html
-        highresimg_reprojected: xr.DataArray = highresimg.rio.reproject(
-            dst_crs=sentinel2img.rio.crs
-        )
-        _highresmask = highresmask.astype(np.float32)
-        _highresmask.rio.set_nodata(input_nodata=np.nan, inplace=True)
-        _highresmask_reprojected: xr.DataArray = _highresmask.rio.reproject(
-            dst_crs=sentinel2img.rio.crs
-        )
-        highresmask_reprojected: xr.DataArray = _highresmask_reprojected.where(
-            cond=highresimg_reprojected.sum(dim="band")
-            != 0
-            # Turn areas with no optical imagery into NaN in the mask too
-        )
+            # Perform the spatial alignment
+            aligned_lowres, aligned_highres = align_lowres_highres_pair(
+                img_highres=highresimgmask_reprojected, img_lowres=sentinel2img
+            )
 
-        # Stack the mask as an extra channel to the RGB-NIR highres image
-        highresimgmask_reprojected: xr.DataArray = xr.concat(
-            objs=[highresimg_reprojected, highresmask_reprojected], dim="band"
-        )
+            # Save aligned lowres and highres images to GeoTIFF
+            os.makedirs(name=f"SuperResolution/{j:04d}", exist_ok=True)
 
-        # Perform the spatial alignment
-        aligned_lowres, aligned_highres = align_lowres_highres_pair(
-            img_highres=highresimgmask_reprojected, img_lowres=sentinel2img
-        )
+            aligned_highresmask_name: str = (
+                f"SuperResolution/{j:04d}/{maskname[:-4]}_reprojected.tif"
+            )
+            (
+                aligned_highres.isel(band=-1) / 255
+            ).rio.to_raster(  # 1 channel mask, scaled to 0-1
+                raster_path=aligned_highresmask_name,
+                dtype=np.float32,  # store as float so that NaN can be represented
+                compress="zstd",
+                tfw="yes",
+            )
 
-        # Save aligned lowres and highres images to GeoTIFF
-        os.makedirs(name=f"SuperResolution/{j:04d}", exist_ok=True)
+            aligned_highresimg_name: str = (
+                f"SuperResolution/{j:04d}/{hresname[:-4]}_reprojected.tif"
+            )
+            aligned_highres[0:4, :, :].rio.to_raster(  # 4 channel RGB+NIR image
+                raster_path=aligned_highresimg_name,
+                dtype=np.uint16,
+                compress="zstd",
+                tfw="yes",
+            )
 
-        aligned_highresmask_name: str = (
-            f"SuperResolution/{j:04d}/{maskname[:-4]}_reprojected.tif"
-        )
-        _aligned_highresmask = aligned_highres.isel(band=-1) / 255  # scale 0-1
-        _aligned_highresmask.rio.to_raster(  # 1 channel mask
-            raster_path=aligned_highresmask_name,
-            dtype=np.float32,  # store as float so that NaN can be represented
-            compress="zstd",
-            tfw="yes",
-        )
+            aligned_lowres_name: str = f"SuperResolution/{j:04d}/{os.path.basename(filename[:-8])}_B8432_cropped.tif"
+            aligned_lowres.rio.to_raster(
+                raster_path=aligned_lowres_name, compress="zstd", tfw="yes"
+            )
 
-        aligned_highresimg_name: str = (
-            f"SuperResolution/{j:04d}/{hresname[:-4]}_reprojected.tif"
-        )
-        aligned_highres[0:4, :, :].rio.to_raster(  # 4 channel RGB+NIR image
-            raster_path=aligned_highresimg_name,
-            dtype=np.uint16,
-            compress="zstd",
-            tfw="yes",
-        )
-
-        aligned_lowres_name: str = f"SuperResolution/{j:04d}/{os.path.basename(filename[:-8])}_B8432_cropped.tif"
-        aligned_lowres.rio.to_raster(
-            raster_path=aligned_lowres_name, compress="zstd", tfw="yes"
-        )
-
-        j += 1
+            j += 1
