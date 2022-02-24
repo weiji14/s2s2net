@@ -8,6 +8,7 @@ https://github.com/PyTorchLightning/deep-learning-project-template
 import os
 import typing
 
+import numpy as np
 import pytorch_lightning as pl
 import rasterio.crs
 import torch
@@ -34,9 +35,9 @@ class S2S2Net(pl.LightningModule):
         super().__init__()
 
         self.conv_in = torch.nn.Conv2d(
-            in_channels=12, out_channels=42, kernel_size=[3, 3], padding=[1, 1]
+            in_channels=4, out_channels=42, kernel_size=[3, 3], padding=[1, 1]
         )
-        # self.upsample = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.upsample = torch.nn.Upsample(scale_factor=5, mode="nearest")
         self.conv_out = torch.nn.Conv2d(
             in_channels=42, out_channels=1, kernel_size=[1, 1], padding=[0, 0]
         )
@@ -47,23 +48,21 @@ class S2S2Net(pl.LightningModule):
 
         TODO
         """
-        _x = self.conv_in(x)
-        # _x = self.upsample(_x)
+        _x = self.conv_in(x.float())
+        _x = self.upsample(_x)
         _x = self.conv_out(_x)
 
         return _x
 
     def training_step(
-        self,
-        batch: typing.Tuple[typing.List[torch.Tensor], typing.List[typing.Dict]],
-        batch_idx: int,
+        self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
     ) -> dict:
         """
         Logic for the neural network's training loop.
         """
-        image = batch["image"]
-        x = image[:, :-1, :, :]
-        y = image[:, -1:, :, :]
+        x = batch["image"]
+        y = batch["mask"]
+
         y_hat: torch.Tensor = self(x.float())
 
         loss: float = F.l1_loss(input=y_hat, target=y)
@@ -88,43 +87,72 @@ class S2S2Net(pl.LightningModule):
 
 
 # %%
-class Sentinel2_L2A(torchgeo.datasets.Sentinel2):
-    filename_glob = "S*_*_B02.tif"
-    filename_regex = """
-        ^S2[AB]_MSIL2A
-        _(?P<date>\d{8}T\d{6})
-        _N\d{4}
-        _R\d{3}
-        _T(?P<tile>\d{2}[A-Z]{3})
-        _(?P<date1>\d{8}T\d{6})
-        _(?P<band>B[018][\dA])\.tif$
+class S2S2Dataset(torchgeo.datasets.VisionDataset):
+    """
+    Training dataset for the Sentinel-2 Super Resolution Segmentation model.
+
+    There are 3 image triples:
+    1. image - Sentinel-2 RGB-NIR image at 10m resolution (4, 512, 512)
+    2. mask - Binary segmentation mask at 2m resolution (1, 2560, 2560)
+    3. hres - High resolution RGB-NIR image at 2m resolution (4, 2560, 2560)
     """
 
     def __init__(
         self,
-        root: str = "data",
-        crs: typing.Optional[rasterio.crs.CRS] = None,
-        res: typing.Optional[float] = None,
-        bands: typing.Sequence[str] = [],
+        root: str = "SuperResolution/chips/npy",
         transforms: typing.Optional[
             typing.Callable[
-                [typing.Dict[str, typing.Any]], typing.Dict[str, typing.Any]
+                [typing.Dict[str, torch.Tensor]], typing.Dict[str, torch.Tensor]
             ]
         ] = None,
-        cache: bool = True,
-    ) -> None:
-        super().__init__(root, crs, res, bands, transforms, cache)
+    ):
+        self.root = root
+        self.transforms = transforms
+        self.ids: list = [
+            int(file[5:9])
+            for file in sorted(os.listdir(os.path.join(self.root, "image")))
+        ]
 
-        # self.filename_regex = self.filename_regex.replace(
-        #     "T(?P<tile>\d{2}[A-Z]{3})", "T?????"
-        # )
+    def __getitem__(self, index: int = 0) -> typing.Dict[str, torch.Tensor]:
+        """
+        Return an index within the dataset.
 
-        self.bands = bands if bands else self.all_bands
-        # self.crs = crs if crs else None
+        Args:
+            index: index to return
 
+        Returns:
+            data and labels at that index
+        """
 
-class WorldviewMask(torchgeo.datasets.RasterDataset):
-    filename_glob = "GE01_20200518213247_105001001D498400_*_mask_pp.tif"
+        image: torch.Tensor = torch.from_numpy(
+            np.load(
+                file=os.path.join(self.root, "image", f"SEN2_{index:04d}.npy")
+            ).astype(np.int16)
+        )
+        mask: torch.Tensor = torch.from_numpy(
+            np.load(file=os.path.join(self.root, "mask", f"MASK_{index:04d}.npy"))
+        )
+        hres: torch.Tensor = torch.from_numpy(
+            np.load(
+                file=os.path.join(self.root, "hres", f"HRES_{index:04d}.npy")
+            ).astype(np.int16)
+        )
+
+        sample: dict = {"image": image, "mask": mask, "hres": hres}
+
+        if self.transforms is not None:
+            sample = self.transforms(sample)
+
+        return sample
+
+    def __len__(self) -> int:
+        """
+        Return the number of data points in the dataset.
+
+        Returns:
+            length of the dataset
+        """
+        return len(self.ids)
 
 
 # %%
@@ -148,58 +176,21 @@ class S2S2DataModule(pl.LightningDataModule):
         Load image data and labels from folders, do preprocessing, etc.
         """
 
-        def del_bbox_transform(sample: dict):
-            """
-            Workaround for FrozenInstanceError: cannot assign to field 'minx'
-            error. Basically to handle the (frozen=True) in
-            torchgeo.datasets.utils.BoundingBox dataclass.
-
-            References:
-            - https://github.com/microsoft/torchgeo/pull/329#discussion_r775576118
-            - https://github.com/microsoft/torchgeo/pull/329/commits/4e2f05552073ec7f747ba3fabb7042d591323418
-            """
-            del sample["bbox"]
-            return sample
-
-        # Pre-load Sentinel-2 data
-        self.s2_dataset = Sentinel2_L2A(
-            root="by_date/sentinel2/17/downloads",
-            # crs=rasterio.crs.CRS.from_epsg(32606),
-            bands=[
-                "B01",
-                "B02",
-                "B03",
-                "B04",
-                "B05",
-                "B06",
-                "B07",
-                "B08",
-                "B8A",
-                "B09",
-                # "B10",
-                "B11",
-                "B12",
-            ],
-            transforms=del_bbox_transform,
-        )
-
-        ## Pre-load Worldview mask data
-        self.wv_dataset = WorldviewMask(root="Nov_2021/", transforms=del_bbox_transform)
-        # Reproject Worldview image from EPSG:3413 to EPSG:32606, because
-        # torchgeo doesn't do it properly with IntersectionDataset
-        self.wv_dataset.crs = rasterio.crs.CRS.from_epsg(32606)
-
-        assert self.s2_dataset.crs == self.wv_dataset.crs
-
     def setup(self, stage: typing.Optional[str] = None) -> torch.utils.data.Dataset:
         """
         Data operations to perform on every GPU.
         Split data into training and test sets, etc.
         """
         # Combine Sentinel2 and Worldview datasets into one!
-        self.dataset = torchgeo.datasets.IntersectionDataset(
-            dataset1=self.s2_dataset, dataset2=self.wv_dataset
+        self.dataset: torch.utils.data.Dataset = S2S2Dataset()
+
+        # Training/Validation split (80%/20%)
+        train_length: int = int(len(self.dataset) * 0.8)
+        val_length: int = len(self.dataset) - train_length
+        self.dataset_train, self.dataset_val = torch.utils.data.random_split(
+            dataset=self.dataset, lengths=(train_length, val_length)
         )
+
         return self.dataset
 
     def train_dataloader(self) -> torch.utils.data.DataLoader:
@@ -207,25 +198,14 @@ class S2S2DataModule(pl.LightningDataModule):
         Loads the data used in the training loop.
         Set the training batch size here too.
         """
-        batch_sampler = torchgeo.samplers.RandomBatchGeoSampler(
-            dataset=self.dataset,
-            size=5120,  # width/height in metres
-            batch_size=32,  # mini-batch size
-            length=256,  # no. of samples per epoch
-        )
         return torch.utils.data.DataLoader(
-            dataset=self.dataset,
-            batch_sampler=batch_sampler,
-            collate_fn=torchgeo.datasets.stack_samples,
+            dataset=self.dataset_train, batch_size=8, num_workers=4
         )
 
         # for batch in torch.utils.data.DataLoader(
-        #     dataset=self.dataset,
-        #     batch_sampler=sampler,
-        #     collate_fn=torchgeo.datasets.stack_samples,
+        #     dataset=self.dataset_train, batch_size=8
         # ):
         #     break
-        # image = batch["image"]
 
 
 # %%
