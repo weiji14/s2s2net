@@ -38,14 +38,14 @@ for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/"))[:11]):
                 )
                 if crop_ds_sen2.shape == (4, 512, 512):  # full size tiles only
                     crop_ds_mask = ds_mask.rio.clip_box(
-                        minx=x, miny=y, maxx=x + 5120 - 10, maxy=y + 5120 - 10
+                        minx=x, miny=y, maxx=x + 5120 - 2.5, maxy=y + 5120 - 2.5
                     )
-                    assert crop_ds_mask.shape == (1, 2556, 2556)
+                    assert crop_ds_mask.shape == (1, 2560, 2560)
 
                     crop_ds_hres = ds_hres.rio.clip_box(
-                        minx=x, miny=y, maxx=x + 5120 - 10, maxy=y + 5120 - 10
+                        minx=x, miny=y, maxx=x + 5120 - 2.5, maxy=y + 5120 - 2.5
                     )
-                    assert crop_ds_hres.shape == (4, 2556, 2556)
+                    assert crop_ds_hres.shape == (4, 2560, 2560)
 
                     # Don't save chips with NaN values, or empty masks
                     if crop_ds_sen2.min().isnull() or crop_ds_mask.max() == 0:
