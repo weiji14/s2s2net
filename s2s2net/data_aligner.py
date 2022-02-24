@@ -80,12 +80,16 @@ def align_lowres_highres_pair(img_highres: xr.DataArray, img_lowres: xr.DataArra
     assert img_highres.rio.crs == img_lowres.rio.crs
 
     left, bottom, right, top = img_highres.rio.bounds()
+    try:
+        assert bottom < top
+    except AssertionError:
+        (bottom, top) = (top, bottom)
     # bounds = rasterio.coords.BoundingBox(left=left, bottom=bottom, right=right, top=top)
     # print(bounds)
 
     # Get highres mask image bounds, rounded nicely to 10m increments
     grid_info = pygmt.grdinfo(
-        grid=img_highres.sel(band=1).astype(int),
+        grid=img_highres.isel(band=-1),
         # ensure new bounds are within the origin bounds
         region=[left + 20, right - 20, bottom + 20, top - 20],
         spacing=10,
@@ -121,11 +125,10 @@ def align_lowres_highres_pair(img_highres: xr.DataArray, img_lowres: xr.DataArra
     )
 
     # Interpolate highres image to exact rounded xy coordinates
-    # TODO install scipy properly
     aligned_highres: xr.DataArray = img_highres.interp(
         method="linear", y=new_y, x=new_x
     ).astype(dtype=img_highres.dtype)
-    assert aligned_highres.dtype == np.uint8
+    assert aligned_highres.dtype == np.float32  # in (np.uint8, np.uint16)
 
     assert new_y[0] in aligned_highres.y
     assert new_x[0] in aligned_highres.x
@@ -148,6 +151,10 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
     highresmask: xr.DataArray = rioxarray.open_rasterio(
         filename=os.path.join("Nov_2021", maskname), lock=False
     )
+    hresname: str = maskname.replace("_DL_", "").replace("mask_pp.tif", ".tif")
+    highresimg: xr.DataArray = rioxarray.open_rasterio(
+        filename=os.path.join("imagery", hresname), lock=False
+    )
 
     # Get corresponding Sentinel 2 10m resolution input image(s)
     pathnames: list = hres_s2_dict[maskname]
@@ -155,7 +162,7 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
         filenames: list = glob.glob(pathname=pathname)
 
         objs: list = []
-        for filename in filenames:
+        for filename in sorted(filenames):
             if filename.endswith(("B08.tif", "B04.tif", "B03.tif", "B02.tif")):
                 band: str = filename[-6:-4]
                 da: xr.DataArray = rioxarray.open_rasterio(
@@ -167,24 +174,52 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
 
         # Reproject HighRes image mask to match projection of Sentinel 2 image
         # https://corteva.github.io/rioxarray/latest/examples/reproject_match.html
-        # Need to set NaN as 0, no river as 0, and river as 255
-        _highresmask = highresmask.where(cond=highresmask != 0, other=128)
-        highresmask_reprojected: xr.DataArray = _highresmask.rio.reproject(
-            dst_crs=sentinel2img.rio.crs, nodata=0
+        highresimg_reprojected: xr.DataArray = highresimg.rio.reproject(
+            dst_crs=sentinel2img.rio.crs
+        )
+        _highresmask = highresmask.astype(np.float32)
+        _highresmask.rio.set_nodata(input_nodata=np.nan, inplace=True)
+        _highresmask_reprojected: xr.DataArray = _highresmask.rio.reproject(
+            dst_crs=sentinel2img.rio.crs
+        )
+        highresmask_reprojected: xr.DataArray = _highresmask_reprojected.where(
+            cond=highresimg_reprojected.sum(dim="band")
+            != 0
+            # Turn areas with no optical imagery into NaN in the mask too
         )
 
+        # Stack the mask as an extra channel to the RGB-NIR highres image
+        highresimgmask_reprojected: xr.DataArray = xr.concat(
+            objs=[highresimg_reprojected, highresmask_reprojected], dim="band"
+        )
+
+        # Perform the spatial alignment
         aligned_lowres, aligned_highres = align_lowres_highres_pair(
-            img_highres=highresmask_reprojected, img_lowres=sentinel2img
+            img_highres=highresimgmask_reprojected, img_lowres=sentinel2img
         )
 
         # Save aligned lowres and highres images to GeoTIFF
         os.makedirs(name=f"SuperResolution/{j:04d}", exist_ok=True)
 
-        aligned_highres_name: str = (
+        aligned_highresmask_name: str = (
             f"SuperResolution/{j:04d}/{maskname[:-4]}_reprojected.tif"
         )
-        aligned_highres.rio.to_raster(
-            raster_path=aligned_highres_name, compress="zstd", tfw="yes"
+        _aligned_highresmask = aligned_highres.isel(band=-1) / 255  # scale 0-1
+        _aligned_highresmask.rio.to_raster(  # 1 channel mask
+            raster_path=aligned_highresmask_name,
+            dtype=np.float32,  # store as float so that NaN can be represented
+            compress="zstd",
+            tfw="yes",
+        )
+
+        aligned_highresimg_name: str = (
+            f"SuperResolution/{j:04d}/{hresname[:-4]}_reprojected.tif"
+        )
+        aligned_highres[0:4, :, :].rio.to_raster(  # 4 channel RGB+NIR image
+            raster_path=aligned_highresimg_name,
+            dtype=np.uint16,
+            compress="zstd",
+            tfw="yes",
         )
 
         aligned_lowres_name: str = f"SuperResolution/{j:04d}/{os.path.basename(filename[:-8])}_B8432_cropped.tif"
