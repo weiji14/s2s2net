@@ -147,6 +147,7 @@ https://conda.anaconda.org/conda-forge/noarch/flit-core-3.6.0-pyhd8ed1ab_0.tar.b
 https://conda.anaconda.org/conda-forge/linux-64/fontconfig-2.13.96-ha180cfb_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/fsspec-2022.1.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/idna-3.3-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/iniconfig-1.1.1-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/ipython_genutils-0.2.0-py_1.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/json5-0.9.5-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libcurl-7.81.0-h494985f_0.tar.bz2
@@ -162,6 +163,7 @@ https://conda.anaconda.org/conda-forge/noarch/platformdirs-2.5.0-pyhd8ed1ab_0.ta
 https://conda.anaconda.org/conda-forge/noarch/prometheus_client-0.13.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/ptyprocess-0.7.0-pyhd3deb0d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pure_eval-0.2.2-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/py-1.11.0-pyh6c4a22f_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pyasn1-0.4.8-py_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pycparser-2.21-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pydeprecate-0.3.2-pyhd8ed1ab_0.tar.bz2
@@ -210,6 +212,7 @@ https://conda.anaconda.org/conda-forge/linux-64/numpy-1.22.2-py39h91f2184_0.tar.
 https://conda.anaconda.org/conda-forge/noarch/packaging-21.3-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pexpect-4.8.0-pyh9f0ad1d_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pillow-9.0.1-py39he69867a_1.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/pluggy-1.0.0-py39hf3d152e_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/postgresql-14.2-hce44dc1_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/proj-8.2.1-h277dcde_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pyasn1-modules-0.2.7-py_0.tar.bz2
@@ -262,6 +265,7 @@ https://conda.anaconda.org/conda-forge/linux-64/poppler-22.01.0-ha39eefc_0.tar.b
 https://conda.anaconda.org/conda-forge/linux-64/protobuf-3.19.4-py39he80948d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pygments-2.11.2-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pyproj-3.3.0-py39hab5ddba_1.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/pytest-7.0.1-py39hf3d152e_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pytorch-1.10.0-cuda112py39h3ad47f5_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/scipy-1.8.0-py39hee8e79c_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/shapely-1.8.0-py39ha65c37e_5.tar.bz2
