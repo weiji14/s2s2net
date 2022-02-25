@@ -2,12 +2,17 @@ name: s2s2net
 channels:
   - conda-forge
 dependencies:
+  - conda-forge::cudatoolkit=11.3.1
   - conda-forge::jupyterlab=3.2.9
   - conda-forge::pandas=1.4.1
+  - conda-forge::pip=22.0.3
   - conda-forge::pygmt=0.5.0
   - conda-forge::pytest=7.0.1
   - conda-forge::python=3.9.10
-  - conda-forge::pytorch=1.10.0
+  - pytorch::pytorch=1.10.0
   - conda-forge::pytorch-lightning=1.5.10
   - conda-forge::rioxarray=0.10.1
   - conda-forge::torchgeo=0.2.0
+  - pip:
+    - https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/mmcv_full-1.4.6-cp39-cp39-manylinux1_x86_64.whl
+    - mmsegmentation==0.21.1
