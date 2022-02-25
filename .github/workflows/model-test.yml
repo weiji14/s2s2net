@@ -1,0 +1,50 @@
+# Continuous Integration tests on GitHub Action
+# For more information see:
+# https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
+
+name: Test S2S2Net
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-20.04
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    steps:
+    - name: Checkout current git repository
+      uses: actions/checkout@v2.4.0
+
+    - name: Setup Miniconda
+      uses: conda-incubator/setup-miniconda@v2.1.1
+      with:
+        mamba-version: "*"
+        channels: conda-forge
+        activate-environment: s2s2net
+        environment-file: environment-linux-64.lock
+        show-channel-urls: true
+
+    - name: Display virtualenv and installed package information
+      run: |
+        conda info
+        conda list
+
+    - name: Code Quality
+      run: black . --check
+
+    - name: Test with pytest
+      run: pytest --verbose tests/
+
+    # - name: Pull test data from dvc remote
+    #   run: |
+    #     dvc pull
+    #     ls -lhR data/
+    #
+    # - name: Test reproducibility of entire ML pipeline
+    #   run: dvc repro
