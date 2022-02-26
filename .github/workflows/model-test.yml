@@ -1,4 +1,4 @@
-# Continuous Integration tests on GitHub Action
+# Continuous Integration tests on GitHub Actions
 # For more information see:
 # https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
@@ -21,19 +21,25 @@ jobs:
     - name: Checkout current git repository
       uses: actions/checkout@v2.4.0
 
-    - name: Setup Miniconda
+    - name: Setup Mambaforge
       uses: conda-incubator/setup-miniconda@v2.1.1
       with:
-        mamba-version: "*"
-        channels: conda-forge
         activate-environment: s2s2net
+        channels: conda-forge
+        miniforge-version: latest
+        miniforge-variant: Mambaforge
+        mamba-version: "*"
+        use-mamba: true
         environment-file: environment-linux-64.lock
         show-channel-urls: true
 
+    - name: Install extra dependencies
+      run: pip install https://download.openmmlab.com/mmcv/dist/cu113/torch1.10.0/mmcv_full-1.4.6-cp39-cp39-manylinux1_x86_64.whl mmsegmentation==0.21.1
+
     - name: Display virtualenv and installed package information
       run: |
-        conda info
-        conda list
+        mamba info
+        mamba list
 
     - name: Code Quality
       run: black . --check
