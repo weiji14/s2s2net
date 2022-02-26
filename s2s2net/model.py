@@ -106,11 +106,7 @@ class S2S2Net(pl.LightningModule):
             x.float()
         )
         assert len(mit_output_tensors) == 4
-
-        # f1: torch.Tensor = mit_output_tensors[0]
-        # f2: torch.Tensor = mit_output_tensors[1]
-        # f3: torch.Tensor = mit_output_tensors[2]
-        # f4: torch.Tensor = mit_output_tensors[3]
+        # f1, f2, f3, f4 = mit_output_tensors
         # print("f1.shape:", f1.shape)  # (8, 32, 128, 128)
         # print("f2.shape:", f2.shape)  # (8, 64, 64, 64)
         # print("f3.shape:", f3.shape)  # (8, 160, 32, 32)
@@ -144,9 +140,25 @@ class S2S2Net(pl.LightningModule):
 
         y_hat: torch.Tensor = self(x)
 
+        # Calculate loss value to minimize
         loss: float = F.binary_cross_entropy_with_logits(input=y_hat, target=y)
 
-        return loss
+        # Calculate metrics to determine how good results are
+        metrics = mmseg.core.eval_metrics(
+            results=y_hat.detach().cpu().numpy(),
+            gt_seg_maps=y.detach().cpu().numpy(),
+            num_classes=2,  # Not present and present
+            ignore_index=255,  # Bad pixel value to ignore
+            metrics=["mIoU", "mDice"],  # , "mFscore"
+        )
+        self.log_dict(
+            dictionary={
+                key: torch.as_tensor(np.mean(val)) for key, val in metrics.items()
+            },
+            prog_bar=True,
+        )
+
+        return {"loss": loss, **metrics}
 
     def configure_optimizers(self):
         """
