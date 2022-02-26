@@ -8,13 +8,11 @@ https://github.com/PyTorchLightning/deep-learning-project-template
 import os
 import typing
 
+import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
-import rasterio.crs
 import torch
-import torchgeo
 import torchgeo.datasets
-import torchgeo.samplers
 from torch.nn import functional as F
 
 # %%
@@ -28,31 +26,112 @@ class S2S2Net(pl.LightningModule):
 
     def __init__(self):
         """
-        Define layers of the Convolutional Neural Network.
+        Define layers of the Vision Tranformer Network.
 
-        TODO
+        Using the Segformer MiT-B0 model coupled with UPerNet.
+        Using Pytorch implementation from mmsegmentation library. Details at
+        https://github.com/open-mmlab/mmsegmentation/tree/v0.21.1/configs/segformer
+
+        |        Backbone        |            'Neck'           |    Head     |
+        |------------------------|-----------------------------|-------------|
+        |  MixVisionTransformer  |   SegFormer Head + Upsample |   UPerNet   |
+
+        Reference:
+        - Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J. M., & Luo, P.
+          (2021). SegFormer: Simple and Efficient Design for Semantic
+          Segmentation with Transformers. ArXiv:2105.15203 [Cs].
+          http://arxiv.org/abs/2105.15203
         """
         super().__init__()
 
-        self.conv_in = torch.nn.Conv2d(
-            in_channels=4, out_channels=42, kernel_size=[3, 3], padding=[1, 1]
-        )
-        self.upsample = torch.nn.Upsample(scale_factor=5, mode="nearest")
-        self.conv_out = torch.nn.Conv2d(
-            in_channels=42, out_channels=1, kernel_size=[1, 1], padding=[0, 0]
+        ## Input Module (Encoder/Backbone). Mix Vision Tranformer config from
+        # https://github.com/open-mmlab/mmsegmentation/blob/v0.21.1/configs/_base_/models/segformer_mit-b0.py#L6-L20
+        self.segformer_backbone = mmseg.models.backbones.MixVisionTransformer(
+            in_channels=4,  # RGB+NIR
+            embed_dims=32,
+            num_stages=4,
+            num_layers=[2, 2, 2, 2],
+            num_heads=[1, 2, 5, 8],
+            patch_sizes=[7, 3, 3, 3],
+            sr_ratios=[8, 4, 2, 1],
+            out_indices=(0, 1, 2, 3),
+            mlp_ratio=4,
+            qkv_bias=True,
+            drop_rate=0.0,
+            attn_drop_rate=0.0,
+            drop_path_rate=0.1,
         )
 
-    def forward(self, x: torch.Tensor) -> typing.Tuple:
+        ## Middle Module (Decoder). SegFormer's All-MLP Head config from
+        # https://github.com/open-mmlab/mmsegmentation/blob/v0.21.1/configs/_base_/models/segformer_mit-b0.py#L21-L29
+        self.segformer_head = mmseg.models.decode_heads.SegformerHead(
+            in_channels=[32, 64, 160, 256],
+            in_index=[0, 1, 2, 3],
+            channels=256,
+            dropout_ratio=0.1,
+            num_classes=8,  # output eight channels
+            # norm_cfg=dict(type="SyncBN", requires_grad=True), # for multi-GPU
+            align_corners=False,
+        )
+
+        ## Upsampling layers (Neck). First one to get back original image size
+        # Second upsample is to get a super-resolution result.
+        self.upsample_1 = torch.nn.Upsample(
+            scale_factor=4, mode="bilinear", align_corners=False
+        )
+        self.upsample_2 = torch.nn.Upsample(
+            scale_factor=5, mode="bilinear", align_corners=False
+        )
+
+        ## Output Module (Head). UPerHead config adapted from
+        # https://github.com/open-mmlab/mmsegmentation/blob/a39f5856ce514ca09a161119041fb8490354c18f/configs/_base_/models/upernet_swin.py#L27-L38
+        self.uper_head = mmseg.models.decode_heads.UPerHead(
+            in_channels=[8, 8],
+            in_index=[1, 0],
+            pool_scales=[1, 2],
+            channels=1,  # one channel for final output
+            num_classes=1,
+            align_corners=False,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass (Inference/Prediction).
 
         TODO
         """
-        _x = self.conv_in(x.float())
-        _x = self.upsample(_x)
-        _x = self.conv_out(_x)
+        ## Step 1. Pass through SegFormer backbone (Mix Transformer x 4)
+        # to get multi-level features F1, F2, F3, F4
+        mit_output_tensors: typing.List[torch.Tensor] = self.segformer_backbone(
+            x.float()
+        )
+        assert len(mit_output_tensors) == 4
 
-        return _x
+        # f1: torch.Tensor = mit_output_tensors[0]
+        # f2: torch.Tensor = mit_output_tensors[1]
+        # f3: torch.Tensor = mit_output_tensors[2]
+        # f4: torch.Tensor = mit_output_tensors[3]
+        # print("f1.shape:", f1.shape)  # (8, 32, 128, 128)
+        # print("f2.shape:", f2.shape)  # (8, 64, 64, 64)
+        # print("f3.shape:", f3.shape)  # (8, 160, 32, 32)
+        # print("f4.shape:", f4.shape)  # (8, 256, 16, 16)
+
+        ## Step 2. Pass through SegFormer head (All-MLP Decoder)
+        # to get a single tensor of size (N, C, H//4, W//4)
+        segformer_output: torch.Tensor = self.segformer_head(mit_output_tensors)
+        # print("segformer_output:", segformer_output.shape) # (8, 8, 128, 128)
+
+        ## Step 3. Do a series of bilinear interpolation upsampling
+        up1_output: torch.Tensor = self.upsample_1(segformer_output)
+        up2_output: torch.Tensor = self.upsample_2(up1_output)
+        # print("up1_output.shape:", up1_output.shape)  # (8, 8, 512, 512)
+        # print("up2_output.shape:", up2_output.shape)  # (8, 8, 2560, 2560)
+
+        ## Step 4. Pass into UPerNet (Pyramid Pooling Module)
+        upernet_output: torch.Tensor = self.uper_head([up1_output, up2_output])
+        # print("upernet_output:", uperhead_output.shape)  # (8, 1, 2560, 2560)
+
+        return upernet_output
 
     def training_step(
         self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
@@ -63,27 +142,29 @@ class S2S2Net(pl.LightningModule):
         x = batch["image"]
         y = batch["mask"]
 
-        y_hat: torch.Tensor = self(x.float())
+        y_hat: torch.Tensor = self(x)
 
-        loss: float = F.l1_loss(input=y_hat, target=y)
-        # loss: float = F.nll_loss(input=y_hat, target=y
+        loss: float = F.binary_cross_entropy_with_logits(input=y_hat, target=y)
 
         return loss
 
     def configure_optimizers(self):
         """
         Optimizing function used to reduce the loss, so that the predicted
-        label gets as close as possible to the groundtruth label.
+        mask gets as close as possible to the groundtruth mask.
 
-        Using the Adam optimizer with a learning rate of 0.01. See:
+        Using the AdamW optimizer with a learning rate of 0.00006. See:
 
-        - Kingma, D. P., & Ba, J. (2017). Adam: A Method for Stochastic
-          Optimization. ArXiv:1412.6980 [Cs]. http://arxiv.org/abs/1412.6980
+        - Loshchilov, I., & Hutter, F. (2019). Decoupled Weight Decay
+          Regularization. ArXiv:1711.05101 [Cs, Math].
+          http://arxiv.org/abs/1711.05101
 
         Documentation at:
-        https://pytorch-lightning.readthedocs.io/en/1.4.5/common/optimizers.html
+        https://pytorch-lightning.readthedocs.io/en/1.5.10/common/optimizers.html
         """
-        return torch.optim.Adam(params=self.parameters(), lr=0.01, weight_decay=0.0005)
+        return torch.optim.AdamW(
+            params=self.parameters(), lr=0.00006, weight_decay=0.01
+        )
 
 
 # %%
