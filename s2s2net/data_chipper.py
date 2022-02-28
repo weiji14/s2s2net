@@ -18,7 +18,7 @@ os.makedirs("SuperResolution/chips/npy/hres", exist_ok=True)
 # Main loop to create the image chips that will become the training dataset
 j: int = 0
 for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/"))):
-    if folder == "chips":
+    if folder.startswith("chips"):
         continue
     sen2_file = glob.glob(f"SuperResolution/{folder}/S2*.tif")[0]
     mask_file, hres_file = sorted(
@@ -47,13 +47,16 @@ for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/"))):
                     )
                     assert crop_ds_hres.shape == (4, 2560, 2560)
 
-                    # Don't save chips with NaN values, or empty masks
+                    # Don't save chips with NaN or 0 only values
                     if (
                         np.isnan(crop_ds_sen2.data.min())
                         or np.isnan(crop_ds_mask.data.min())
+                        or crop_ds_sen2.max() == 0
                         or crop_ds_mask.max() == 0
                     ):
                         continue
+
+                    assert crop_ds_hres.max() != 0
 
                     # Save as npy file format
                     np.save(
