@@ -13,6 +13,7 @@ import numpy as np
 import pytorch_lightning as pl
 import torch
 import torchgeo.datasets
+import torchvision.ops
 from torch.nn import functional as F
 
 # %%
@@ -28,13 +29,13 @@ class S2S2Net(pl.LightningModule):
         """
         Define layers of the Vision Tranformer Network.
 
-        Using the Segformer MiT-B0 model coupled with UPerNet.
+        Using the Segformer MiT-B0 model coupled with upsampling layers.
         Using Pytorch implementation from mmsegmentation library. Details at
         https://github.com/open-mmlab/mmsegmentation/tree/v0.21.1/configs/segformer
 
-        |        Backbone        |            'Neck'           |    Head     |
-        |------------------------|-----------------------------|-------------|
-        |  MixVisionTransformer  |   SegFormer Head + Upsample |   UPerNet   |
+        |        Backbone        |       'Neck'       |          Head         |
+        |------------------------|--------------- ----|-----------------------|
+        |  MixVisionTransformer  |   SegFormer Head   |   Upsample + Conv2D   |
 
         Reference:
         - Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J. M., & Luo, P.
@@ -69,29 +70,21 @@ class S2S2Net(pl.LightningModule):
             in_index=[0, 1, 2, 3],
             channels=256,
             dropout_ratio=0.1,
-            num_classes=8,  # output eight channels
+            num_classes=16,  # output sixteen channels
             # norm_cfg=dict(type="SyncBN", requires_grad=True), # for multi-GPU
             align_corners=False,
         )
 
-        ## Upsampling layers (Neck). First one to get back original image size
-        # Second upsample is to get a super-resolution result.
-        self.upsample_1 = torch.nn.Upsample(
-            scale_factor=4, mode="bilinear", align_corners=False
+        ## Upsampling layers (Output). 1st one to get back original image size
+        # 2nd upsample is to get a super-resolution result. Each of the two
+        # upsample layers are followed by a Convolutional 2D layer.
+        self.upsample_1 = torch.nn.Upsample(scale_factor=4, mode="nearest")
+        self.post_upsample_conv_layer_1 = torch.nn.Conv2d(
+            in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
         )
-        self.upsample_2 = torch.nn.Upsample(
-            scale_factor=5, mode="bilinear", align_corners=False
-        )
-
-        ## Output Module (Head). UPerHead config adapted from
-        # https://github.com/open-mmlab/mmsegmentation/blob/a39f5856ce514ca09a161119041fb8490354c18f/configs/_base_/models/upernet_swin.py#L27-L38
-        self.uper_head = mmseg.models.decode_heads.UPerHead(
-            in_channels=[8, 8],
-            in_index=[1, 0],
-            pool_scales=[1, 2],
-            channels=1,  # one channel for final output
-            num_classes=1,
-            align_corners=False,
+        self.upsample_2 = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.post_upsample_conv_layer_2 = torch.nn.Conv2d(
+            in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -115,19 +108,17 @@ class S2S2Net(pl.LightningModule):
         ## Step 2. Pass through SegFormer head (All-MLP Decoder)
         # to get a single tensor of size (N, C, H//4, W//4)
         segformer_output: torch.Tensor = self.segformer_head(mit_output_tensors)
-        # print("segformer_output:", segformer_output.shape) # (8, 8, 128, 128)
+        # print("segformer_output:", segformer_output.shape) # (8, 16, 128, 128)
 
-        ## Step 3. Do a series of bilinear interpolation upsampling
+        ## Step 3. Do a series of bilinear interpolation upsampling + Conv2d
         up1_output: torch.Tensor = self.upsample_1(segformer_output)
-        up2_output: torch.Tensor = self.upsample_2(up1_output)
+        up1_conv_output: torch.Tensor = self.post_upsample_conv_layer_1(up1_output)
         # print("up1_output.shape:", up1_output.shape)  # (8, 8, 512, 512)
-        # print("up2_output.shape:", up2_output.shape)  # (8, 8, 2560, 2560)
+        up2_output: torch.Tensor = self.upsample_2(up1_conv_output)
+        up2_conv_output: torch.Tensor = self.post_upsample_conv_layer_2(up2_output)
+        # print("up2_output.shape:", up2_output.shape)  # (8, 1, 2560, 2560)
 
-        ## Step 4. Pass into UPerNet (Pyramid Pooling Module)
-        upernet_output: torch.Tensor = self.uper_head([up1_output, up2_output])
-        # print("upernet_output:", uperhead_output.shape)  # (8, 1, 2560, 2560)
-
-        return upernet_output
+        return up2_conv_output
 
     def training_step(
         self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
@@ -141,7 +132,10 @@ class S2S2Net(pl.LightningModule):
         y_hat: torch.Tensor = self(x)
 
         # Calculate loss value to minimize
-        loss: float = F.binary_cross_entropy_with_logits(input=y_hat, target=y)
+        # loss: float = F.binary_cross_entropy_with_logits(input=y_hat, target=y)
+        loss: float = torchvision.ops.sigmoid_focal_loss(
+            inputs=y_hat, targets=y, alpha=0.75, gamma=2, reduction="mean"
+        )
 
         # Calculate metrics to determine how good results are
         metrics = mmseg.core.eval_metrics(
@@ -292,7 +286,7 @@ class S2S2DataModule(pl.LightningDataModule):
         Set the training batch size here too.
         """
         return torch.utils.data.DataLoader(
-            dataset=self.dataset_train, batch_size=8, num_workers=4
+            dataset=self.dataset_train, batch_size=32, num_workers=4
         )
 
         # for batch in torch.utils.data.DataLoader(
