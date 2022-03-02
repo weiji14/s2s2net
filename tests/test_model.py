@@ -34,5 +34,6 @@ def test_s2s2net():
     trainer: pl.Trainer = pl.Trainer(fast_dev_run=True)
     trainer.fit(model=model, train_dataloaders=dataloader)
 
-    # Test
-    # TODO
+    # Test inference
+    predictions = trainer.predict(model=model, dataloaders=dataloader)
+    assert torch.cat(tensors=predictions).shape == (1, 1, 2560, 2560)

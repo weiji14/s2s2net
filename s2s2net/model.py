@@ -5,16 +5,19 @@ Code structure adapted from Pytorch Lightning project seed at
 https://github.com/PyTorchLightning/deep-learning-project-template
 """
 
+import glob
 import os
 import typing
 
 import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
+import rioxarray
 import torch
 import torchgeo.datasets
 import torchvision.ops
 from torch.nn import functional as F
+
 
 # %%
 class S2S2Net(pl.LightningModule):
@@ -95,9 +98,8 @@ class S2S2Net(pl.LightningModule):
         """
         ## Step 1. Pass through SegFormer backbone (Mix Transformer x 4)
         # to get multi-level features F1, F2, F3, F4
-        mit_output_tensors: typing.List[torch.Tensor] = self.segformer_backbone(
-            x.float()
-        )
+        # x: torch.Tensor = torch.randn(8, 4, 512, 512)
+        mit_output_tensors: typing.List[torch.Tensor] = self.segformer_backbone(x)
         assert len(mit_output_tensors) == 4
         # f1, f2, f3, f4 = mit_output_tensors
         # print("f1.shape:", f1.shape)  # (8, 32, 128, 128)
@@ -126,8 +128,8 @@ class S2S2Net(pl.LightningModule):
         """
         Logic for the neural network's training loop.
         """
-        x = batch["image"]
-        y = batch["mask"]
+        x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
+        y: torch.Tensor = batch["mask"]  # Groundtruth binary mask
 
         y_hat: torch.Tensor = self(x)
 
@@ -138,7 +140,7 @@ class S2S2Net(pl.LightningModule):
         )
 
         # Calculate metrics to determine how good results are
-        metrics = mmseg.core.eval_metrics(
+        metrics: dict = mmseg.core.eval_metrics(
             results=y_hat.detach().cpu().numpy(),
             gt_seg_maps=y.detach().cpu().numpy(),
             num_classes=2,  # Not present and present
@@ -152,7 +154,32 @@ class S2S2Net(pl.LightningModule):
             prog_bar=True,
         )
 
+        # Log training loss and metrics to Tensorboard
+        if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
+            for metric_name, metric_value in metrics.items():
+                self.logger.experiment.add_scalar(
+                    tag=metric_name,
+                    scalar_value=np.mean(metric_value),
+                    global_step=self.global_step,
+                    # epoch=self.current_epoch,
+                )
+
         return {"loss": loss, **metrics}
+
+    def predict_step(
+        self,
+        batch: typing.Dict[str, torch.Tensor],
+        batch_idx: int,
+        dataloader_idx: typing.Optional[int] = None,
+    ):
+        """
+        Logic for the neural network's prediction loop.
+        """
+        x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
+
+        y_hat: torch.Tensor = self(x)
+
+        return torch.sigmoid(input=y_hat)
 
     def configure_optimizers(self):
         """
@@ -186,19 +213,23 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
 
     def __init__(
         self,
-        root: str = "SuperResolution/chips/npy",
+        root: str = "SuperResolution/chips/npy",  # Train/Validation chips
+        # root: str = "SuperResolution/aligned",  # Inference on actual images
+        train: bool = True,  # Whether to load training set or predict only
         transforms: typing.Optional[
             typing.Callable[
                 [typing.Dict[str, torch.Tensor]], typing.Dict[str, torch.Tensor]
             ]
         ] = None,
     ):
-        self.root = root
+        self.root: str = root
+        self.train: bool = train
         self.transforms = transforms
-        self.ids: list = [
-            int(file[5:9])
-            for file in sorted(os.listdir(os.path.join(self.root, "image")))
-        ]
+
+        img_path: str = (
+            os.path.join(self.root, "image") if self.train else os.path.join(self.root)
+        )
+        self.ids: list = [int(id) for id, _ in enumerate(os.listdir(path=img_path))]
 
     def __getitem__(self, index: int = 0) -> typing.Dict[str, torch.Tensor]:
         """
@@ -210,25 +241,36 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         Returns:
             data and labels at that index
         """
+        if self.train:
+            image: torch.Tensor = torch.from_numpy(
+                np.load(
+                    file=os.path.join(self.root, "image", f"SEN2_{index:04d}.npy")
+                ).astype(np.int16)
+            )
+            mask: torch.Tensor = torch.from_numpy(
+                np.load(file=os.path.join(self.root, "mask", f"MASK_{index:04d}.npy"))
+            )
+            hres: torch.Tensor = torch.from_numpy(
+                np.load(
+                    file=os.path.join(self.root, "hres", f"HRES_{index:04d}.npy")
+                ).astype(np.int16)
+            )
 
-        image: torch.Tensor = torch.from_numpy(
-            np.load(
-                file=os.path.join(self.root, "image", f"SEN2_{index:04d}.npy")
-            ).astype(np.int16)
-        )
-        mask: torch.Tensor = torch.from_numpy(
-            np.load(file=os.path.join(self.root, "mask", f"MASK_{index:04d}.npy"))
-        )
-        hres: torch.Tensor = torch.from_numpy(
-            np.load(
-                file=os.path.join(self.root, "hres", f"HRES_{index:04d}.npy")
-            ).astype(np.int16)
-        )
+            sample: dict = {"image": image, "mask": mask, "hres": hres}
 
-        sample: dict = {"image": image, "mask": mask, "hres": hres}
+        else:
+            filename: str = glob.glob(
+                os.path.join(self.root, f"{index:04d}", "S2*.tif")
+            )[0]
+            with rioxarray.open_rasterio(filename=filename) as rds:
+                assert rds.ndim == 3  # Channel, Height, Width
+                assert rds.shape[0] == 4  # 4 bands/channels (RGB+NIR)
+                sample: dict = {
+                    "image": torch.as_tensor(data=rds.data.astype(np.int16))
+                }
 
         if self.transforms is not None:
-            sample = self.transforms(sample)
+            sample: typing.Dict[str, torch.Tensor] = self.transforms(sample)
 
         return sample
 
@@ -268,15 +310,23 @@ class S2S2DataModule(pl.LightningDataModule):
         Data operations to perform on every GPU.
         Split data into training and test sets, etc.
         """
-        # Combine Sentinel2 and Worldview datasets into one!
-        self.dataset: torch.utils.data.Dataset = S2S2Dataset()
+        if stage == "fit" or stage is None:  # Training/Validation on chips
+            # Combine Sentinel2 and Worldview datasets into one!
+            self.dataset: torch.utils.data.Dataset = S2S2Dataset(
+                root="SuperResolution/chips/npy", train=True
+            )
 
-        # Training/Validation split (80%/20%)
-        train_length: int = int(len(self.dataset) * 0.8)
-        val_length: int = len(self.dataset) - train_length
-        self.dataset_train, self.dataset_val = torch.utils.data.random_split(
-            dataset=self.dataset, lengths=(train_length, val_length)
-        )
+            # Training/Validation split (80%/20%)
+            train_length: int = int(len(self.dataset) * 0.8)
+            val_length: int = len(self.dataset) - train_length
+            self.dataset_train, self.dataset_val = torch.utils.data.random_split(
+                dataset=self.dataset, lengths=(train_length, val_length)
+            )
+
+        elif stage == "predict":  # Inference on actual images
+            self.dataset: torch.utils.data.Dataset = S2S2Dataset(
+                root="SuperResolution/aligned", train=False
+            )
 
         return self.dataset
 
@@ -292,6 +342,16 @@ class S2S2DataModule(pl.LightningDataModule):
         # for batch in torch.utils.data.DataLoader(
         #     dataset=self.dataset_train, batch_size=8
         # ):
+        #     break
+
+    def predict_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        Loads the data used in the prediction loop.
+        Set the prediction batch size here too.
+        """
+        return torch.utils.data.DataLoader(dataset=self.dataset, batch_size=1)
+
+        # for batch in torch.utils.data.DataLoader(dataset=self.dataset, batch_size=1):
         #     break
 
 
@@ -320,6 +380,11 @@ def cli_main():
     # Initialize Model
     model: pl.LightningModule = S2S2Net()
 
+    # Setup Tensorboard logger
+    tensorboard_logger: pl.loggers.LightningLoggerBase = pl.loggers.TensorBoardLogger(
+        save_dir="tb_logs", name="s2s2net"
+    )
+
     # Training
     # TODO contribute to pytorch lightning so that deterministic="warn" works
     # Only works in Pytorch 1.11 or 1.12 I think
@@ -328,7 +393,8 @@ def cli_main():
     trainer: pl.Trainer = pl.Trainer(
         # deterministic=True,
         gpus=1,
-        max_epochs=3,
+        logger=tensorboard_logger,
+        max_epochs=27,
         precision=16,
     )
 

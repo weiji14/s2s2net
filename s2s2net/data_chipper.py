@@ -17,12 +17,10 @@ os.makedirs("SuperResolution/chips/npy/hres", exist_ok=True)
 # %%
 # Main loop to create the image chips that will become the training dataset
 j: int = 0
-for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/"))):
-    if folder.startswith("chips"):
-        continue
-    sen2_file = glob.glob(f"SuperResolution/{folder}/S2*.tif")[0]
+for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/aligned"))):
+    sen2_file = glob.glob(f"SuperResolution/aligned/{folder}/S2*.tif")[0]
     mask_file, hres_file = sorted(
-        glob.glob(f"SuperResolution/{folder}/*_reprojected.tif")
+        glob.glob(f"SuperResolution/aligned/{folder}/*_reprojected.tif")
     )
 
     with (

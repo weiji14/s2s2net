@@ -215,10 +215,10 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
             )
 
             # Save aligned lowres and highres images to GeoTIFF
-            os.makedirs(name=f"SuperResolution/{j:04d}", exist_ok=True)
+            os.makedirs(name=f"SuperResolution/aligned/{j:04d}", exist_ok=True)
 
             aligned_highresmask_name: str = (
-                f"SuperResolution/{j:04d}/{maskname[:-4]}_reprojected.tif"
+                f"SuperResolution/aligned/{j:04d}/{maskname[:-4]}_reprojected.tif"
             )
             (
                 aligned_highres.isel(band=-1) / 255
@@ -230,7 +230,7 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
             )
 
             aligned_highresimg_name: str = (
-                f"SuperResolution/{j:04d}/{hresname[:-4]}_reprojected.tif"
+                f"SuperResolution/aligned/{j:04d}/{hresname[:-4]}_reprojected.tif"
             )
             aligned_highres[0:4, :, :].rio.to_raster(  # 4 channel RGB+NIR image
                 raster_path=aligned_highresimg_name,
@@ -239,7 +239,7 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
                 tfw="yes",
             )
 
-            aligned_lowres_name: str = f"SuperResolution/{j:04d}/{os.path.basename(filename[:-8])}_B8432_cropped.tif"
+            aligned_lowres_name: str = f"SuperResolution/aligned/{j:04d}/{os.path.basename(filename[:-8])}_B8432_cropped.tif"
             aligned_lowres.rio.to_raster(
                 raster_path=aligned_lowres_name, compress="zstd", tfw="yes"
             )
