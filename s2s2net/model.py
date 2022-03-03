@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 import rioxarray
 import torch
 import torchgeo.datasets
+import torchmetrics
 import torchvision.ops
 from torch.nn import functional as F
 
@@ -90,6 +91,10 @@ class S2S2Net(pl.LightningModule):
             in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
         )
 
+        # Evaluation metrics to know how good the segmentation results are
+        self.iou = torchmetrics.JaccardIndex(num_classes=2)
+        self.f1_score = torchmetrics.F1Score(num_classes=1)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass (Inference/Prediction).
@@ -140,26 +145,23 @@ class S2S2Net(pl.LightningModule):
         )
 
         # Calculate metrics to determine how good results are
-        metrics: dict = mmseg.core.eval_metrics(
-            results=y_hat.detach().cpu().numpy(),
-            gt_seg_maps=y.detach().cpu().numpy(),
-            num_classes=2,  # Not present and present
-            ignore_index=255,  # Bad pixel value to ignore
-            metrics=["mIoU", "mDice"],  # , "mFscore"
+        iou_score: torch.Tensor = self.iou(
+            preds=y_hat["segmmask_conv_output_2"].squeeze(),
+            target=(y > 0.5).squeeze().to(dtype=torch.int8),  # binarize
         )
-        self.log_dict(
-            dictionary={
-                key: torch.as_tensor(np.mean(val)) for key, val in metrics.items()
-            },
-            prog_bar=True,
+        f1_score: torch.Tensor = self.f1_score(
+            preds=y_hat["segmmask_conv_output_2"].ravel(),
+            target=(y > 0.5).ravel().to(dtype=torch.int8),  # binarize
         )
+        metrics: typing.Dict[str, torch.Tensor] = {"iou": iou_score, "f1": f1_score}
+        self.log_dict(dictionary=metrics, prog_bar=True)
 
         # Log training loss and metrics to Tensorboard
         if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
             for metric_name, metric_value in metrics.items():
                 self.logger.experiment.add_scalar(
                     tag=metric_name,
-                    scalar_value=np.mean(metric_value),
+                    scalar_value=metric_value,
                     global_step=self.global_step,
                     # epoch=self.current_epoch,
                 )
