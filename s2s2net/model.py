@@ -146,11 +146,11 @@ class S2S2Net(pl.LightningModule):
 
         # Calculate metrics to determine how good results are
         iou_score: torch.Tensor = self.iou(
-            preds=y_hat["segmmask_conv_output_2"].squeeze(),
+            preds=y_hat.squeeze(),
             target=(y > 0.5).squeeze().to(dtype=torch.int8),  # binarize
         )
         f1_score: torch.Tensor = self.f1_score(
-            preds=y_hat["segmmask_conv_output_2"].ravel(),
+            preds=y_hat.ravel(),
             target=(y > 0.5).ravel().to(dtype=torch.int8),  # binarize
         )
         metrics: typing.Dict[str, torch.Tensor] = {"iou": iou_score, "f1": f1_score}
