@@ -1,9 +1,10 @@
 name: s2s2net
 channels:
   - conda-forge
+  - rapidsai
 dependencies:
   - conda-forge::black=22.1.0
-  - rapidsai::cucim=22.0.2
+  - rapidsai::cucim=22.02.00
   - conda-forge::cudatoolkit=11.3.1
   - conda-forge::jupyterlab=3.2.9
   - conda-forge::pandas=1.4.1

@@ -27,6 +27,7 @@ https://conda.anaconda.org/conda-forge/linux-64/aom-3.3.0-h27087fc_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/blosc-1.21.0-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/bzip2-1.0.8-h7f98852_4.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/c-ares-1.18.1-h7f98852_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/charls-2.3.4-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/cudatoolkit-11.3.1-ha36c431_10.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/expat-2.4.7-h27087fc_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/fftw-3.3.10-nompi_h77c792f_102.tar.bz2
@@ -39,9 +40,11 @@ https://conda.anaconda.org/conda-forge/linux-64/icu-69.1-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/jbig-2.1-h7f98852_2003.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/jpeg-9e-h7f98852_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/json-c-0.15-h98cffda_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/jxrlib-1.1-h7f98852_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/keyutils-1.6.1-h166bdaf_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/lame-3.100-h7f98852_1001.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/lerc-3.0-h9c3ff4c_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/libaec-1.0.6-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libbrotlicommon-1.0.9-h7f98852_6.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libdeflate-1.10-h7f98852_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libev-4.33-h516909a_1.tar.bz2
@@ -56,6 +59,7 @@ https://conda.anaconda.org/conda-forge/linux-64/libuv-1.43.0-h7f98852_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libvpx-1.11.0-h9c3ff4c_3.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libwebp-base-1.2.2-h7f98852_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.2.11-h36c2ea0_1013.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/libzopfli-1.0.3-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/lz4-c-1.9.3-h9c3ff4c_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.3-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/nettle-3.6-he412f7d_0.tar.bz2
@@ -64,6 +68,7 @@ https://conda.anaconda.org/conda-forge/linux-64/openssl-1.1.1l-h7f98852_0.tar.bz
 https://conda.anaconda.org/conda-forge/linux-64/pcre-8.45-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pixman-0.40.0-h36c2ea0_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pthread-stubs-0.4-h36c2ea0_1001.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/snappy-1.1.8-he1b5a44_3.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/svt-av1-0.9.1-h27087fc_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/tbb-2021.5.0-h4bd325d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/tzcode-2021e-h7f98852_0.tar.bz2
@@ -78,8 +83,10 @@ https://conda.anaconda.org/conda-forge/linux-64/xorg-xextproto-7.3.0-h7f98852_10
 https://conda.anaconda.org/conda-forge/linux-64/xorg-xproto-7.0.31-h7f98852_1007.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/xz-5.2.5-h516909a_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/yaml-0.2.5-h7f98852_2.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/zfp-0.5.5-h9c3ff4c_8.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/gettext-0.19.8.1-h73d1719_1008.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/gnutls-3.6.13-h85f3911_1.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/libavif-0.9.3-h166bdaf_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libbrotlidec-1.0.9-h7f98852_6.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libbrotlienc-1.0.9-h7f98852_6.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libdrm-2.4.109-h7f98852_0.tar.bz2
@@ -97,8 +104,10 @@ https://conda.anaconda.org/conda-forge/linux-64/zlib-1.2.11-h36c2ea0_1013.tar.bz
 https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.2-ha95c52a_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/boost-cpp-1.74.0-h6cacc03_7.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/brotli-bin-1.0.9-h7f98852_6.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/c-blosc2-2.0.4-h5f21a17_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/hdf4-4.2.15-h10796ff_3.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/krb5-1.19.3-h3790be6_0.tar.bz2
+https://conda.anaconda.org/rapidsai/linux-64/libcucim-22.02.00-cuda11_g29bfe6f_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libglib-2.70.2-h174f98d_4.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libnghttp2-1.47.0-h727a467_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libpng-1.6.37-h21135ba_2.tar.bz2
@@ -132,9 +141,11 @@ https://conda.anaconda.org/conda-forge/noarch/attrs-21.4.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/backcall-0.2.0-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/backports-1.0-py_2.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/blinker-1.4-py_1.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/brunsli-0.1-h9c3ff4c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/cachetools-5.0.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/cfitsio-4.0.0-h9a35b8e_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/charset-normalizer-2.0.12-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/cloudpickle-2.0.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/colorama-0.4.4-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/curl-7.82.0-h7bff187_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/cycler-0.11.0-pyhd8ed1ab_0.tar.bz2
@@ -154,6 +165,7 @@ https://conda.anaconda.org/conda-forge/noarch/json5-0.9.5-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libcblas-3.9.0-13_linux64_mkl.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/liblapack-3.9.0-13_linux64_mkl.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/libva-2.14.0-h7f98852_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/locket-0.2.0-py_2.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyh9f0ad1d_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/nest-asyncio-1.5.4-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pandocfilters-1.5.0-pyhd8ed1ab_0.tar.bz2
@@ -181,6 +193,7 @@ https://conda.anaconda.org/conda-forge/noarch/tensorboard-plugin-wit-1.8.1-pyhd8
 https://conda.anaconda.org/conda-forge/noarch/testpath-0.6.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/threadpoolctl-3.1.0-pyh8a188c0_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/tomli-2.0.1-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/toolz-0.11.2-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/traitlets-5.1.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/typing_extensions-4.1.1-pyha770c72_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/webencodings-0.5.1-py_1.tar.bz2
@@ -196,7 +209,9 @@ https://conda.anaconda.org/conda-forge/linux-64/cairo-1.16.0-ha12eb4b_1010.tar.b
 https://conda.anaconda.org/conda-forge/linux-64/certifi-2021.10.8-py39hf3d152e_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/cffi-1.15.0-py39h4bc2ebd_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/click-8.0.4-py39hf3d152e_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/cytoolz-0.11.2-py39h3811e60_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/debugpy-1.5.1-py39he80948d_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/fastrlock-0.8-py39he80948d_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/ffmpeg-5.0.0-h594f047_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/frozenlist-1.3.0-py39h3811e60_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/future-0.18.2-py39hf3d152e_4.tar.bz2
@@ -218,6 +233,7 @@ https://conda.anaconda.org/conda-forge/linux-64/multidict-6.0.2-py39h3811e60_0.t
 https://conda.anaconda.org/conda-forge/linux-64/mypy_extensions-0.4.3-py39hf3d152e_4.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/numpy-1.22.3-py39h18676bf_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/packaging-21.3-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/partd-1.2.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pexpect-4.8.0-pyh9f0ad1d_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pillow-9.0.1-py39hae2aec6_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pluggy-1.0.0-py39hf3d152e_2.tar.bz2
@@ -253,9 +269,13 @@ https://conda.anaconda.org/conda-forge/linux-64/cftime-1.6.0-py39hd257fcd_0.tar.
 https://conda.anaconda.org/conda-forge/noarch/click-plugins-1.1.1-py_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/cligj-0.7.2-pyhd8ed1ab_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/cryptography-36.0.1-py39h95dcef6_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/cupy-10.2.0-py39hc3c280e_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/dask-core-2022.2.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/einops-0.4.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/fonttools-4.30.0-py39hb9d737c_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/grpcio-1.44.0-py39hff7568b_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/imagecodecs-2022.2.22-py39hf577088_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/imageio-2.16.1-pyhcf75d05_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/importlib_metadata-4.11.3-hd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/jinja2-3.0.3-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/joblib-1.1.0-pyhd8ed1ab_0.tar.bz2
@@ -271,6 +291,7 @@ https://conda.anaconda.org/conda-forge/linux-64/protobuf-3.19.4-py39he80948d_0.t
 https://conda.anaconda.org/conda-forge/noarch/pygments-2.11.2-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pyproj-3.3.0-py39hcadae2f_2.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/pytest-7.0.1-py39hf3d152e_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/pywavelets-1.3.0-py39hd257fcd_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/scipy-1.8.0-py39hee8e79c_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/shapely-1.8.0-py39ha65c37e_5.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/snuggs-1.4.7-py_0.tar.bz2
@@ -288,10 +309,12 @@ https://conda.anaconda.org/conda-forge/linux-64/netcdf4-1.5.8-nompi_py39h64b754b
 https://conda.anaconda.org/conda-forge/noarch/oauthlib-3.2.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pyopenssl-22.0.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/scikit-learn-1.0.2-py39h4dfa638_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/tifffile-2022.2.9-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/wcwidth-0.2.5-pyh9f0ad1d_2.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/xarray-2022.3.0-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/gdal-3.4.2-py39hc691d54_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/nbclient-0.5.13-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/networkx-2.7.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/prompt-toolkit-3.0.27-pyha770c72_0.tar.bz2
 https://conda.anaconda.org/pytorch/linux-64/pytorch-1.10.0-py3.9_cuda11.3_cudnn8.2.0_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/rasterio-1.2.10-py39h2e4b6e6_5.tar.bz2
@@ -304,11 +327,13 @@ https://conda.anaconda.org/conda-forge/noarch/kornia-0.6.3-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/nbconvert-6.4.4-py39hf3d152e_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/requests-2.27.1-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/rioxarray-0.10.1-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/linux-64/scikit-image-0.19.2-py39hde0f152_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/torchmetrics-0.7.2-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/pytorch/linux-64/torchvision-0.11.1-py39_cu113.tar.bz2
+https://conda.anaconda.org/rapidsai/linux-64/cucim-22.02.00-cuda_11_py39_g29bfe6f_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/google-auth-2.6.0-pyh6c4a22f_1.tar.bz2
 https://conda.anaconda.org/conda-forge/linux-64/ipykernel-6.9.2-py39hef51801_0.tar.bz2
-https://conda.anaconda.org/conda-forge/noarch/jupyter_server-1.15.5-pyhd8ed1ab_0.tar.bz2
+https://conda.anaconda.org/conda-forge/noarch/jupyter_server-1.15.6-pyhd8ed1ab_0.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pretrainedmodels-0.7.4-pyhd8ed1ab_2.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/pygmt-0.5.0-pyhd8ed1ab_1.tar.bz2
 https://conda.anaconda.org/conda-forge/noarch/requests-oauthlib-1.3.1-pyhd8ed1ab_0.tar.bz2
