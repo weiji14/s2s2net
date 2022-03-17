@@ -1,4 +1,4 @@
-# S2S2Net Python package
+# S2S2Net Python application
 
 This folder contains Python scripts used to pre-process satellite data, as well
 as the neural network model architecture, data loaders, and training/testing

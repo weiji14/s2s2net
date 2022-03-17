@@ -5,3 +5,9 @@ __pycache__/
 
 # Data files and folders
 *.csv
+*.npy
+
+# Pytorch Lightning checkpoints
+lightning_logs/
+tb_logs/
+*.ckpt

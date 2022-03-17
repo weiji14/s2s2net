@@ -5,8 +5,9 @@ Based loosely on Pytorch Lightning's testing method described at
 https://github.com/PyTorchLightning/pytorch-lightning/blob/1.5.10/.github/CONTRIBUTING.md#how-to-add-new-tests
 """
 import pytorch_lightning as pl
-import s2s2net.model
 import torch
+
+import s2s2net.model
 
 
 class RandomDataset(torch.utils.data.Dataset):
@@ -17,7 +18,11 @@ class RandomDataset(torch.utils.data.Dataset):
         return 2
 
     def __getitem__(self, idx: int) -> dict:
-        return {"image": torch.randn(4, 512, 512), "mask": torch.randn(1, 2560, 2560)}
+        return {
+            "image": torch.randn(4, 512, 512),
+            "mask": torch.randn(1, 2560, 2560),
+            "hres": torch.randn(4, 2560, 2560),
+        }
 
 
 def test_s2s2net():
@@ -36,4 +41,6 @@ def test_s2s2net():
 
     # Test inference
     predictions = trainer.predict(model=model, dataloaders=dataloader)
-    assert torch.cat(tensors=predictions).shape == (1, 1, 2560, 2560)
+    segmmask, superres = predictions[0]
+    assert segmmask.shape == (1, 1, 2560, 2560)
+    assert superres.shape == (1, 4, 2560, 2560)

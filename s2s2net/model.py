@@ -82,20 +82,29 @@ class S2S2Net(pl.LightningModule):
         ## Upsampling layers (Output). 1st one to get back original image size
         # 2nd upsample is to get a super-resolution result. Each of the two
         # upsample layers are followed by a Convolutional 2D layer.
-        self.upsample_1 = torch.nn.Upsample(scale_factor=4, mode="nearest")
-        self.post_upsample_conv_layer_1 = torch.nn.Conv2d(
+        self.segmmask_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_0 = torch.nn.Conv2d(
             in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
         )
-        self.upsample_2 = torch.nn.Upsample(scale_factor=5, mode="nearest")
-        self.post_upsample_conv_layer_2 = torch.nn.Conv2d(
+        self.segmmask_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_1 = torch.nn.Conv2d(
             in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
+        )
+
+        self.superres_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
+        self.superres_post_upsample_conv_layer_0 = torch.nn.Conv2d(
+            in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
+        )
+        self.superres_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.superres_post_upsample_conv_layer_1 = torch.nn.Conv2d(
+            in_channels=8, out_channels=4, kernel_size=3, stride=1, padding=1
         )
 
         # Evaluation metrics to know how good the segmentation results are
         self.iou = torchmetrics.JaccardIndex(num_classes=2)
         self.f1_score = torchmetrics.F1Score(num_classes=1)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> typing.Dict[str, torch.Tensor]:
         """
         Forward pass (Inference/Prediction).
 
@@ -118,14 +127,40 @@ class S2S2Net(pl.LightningModule):
         # print("segformer_output:", segformer_output.shape) # (8, 16, 128, 128)
 
         ## Step 3. Do a series of bilinear interpolation upsampling + Conv2d
-        up1_output: torch.Tensor = self.upsample_1(segformer_output)
-        up1_conv_output: torch.Tensor = self.post_upsample_conv_layer_1(up1_output)
-        # print("up1_output.shape:", up1_output.shape)  # (8, 8, 512, 512)
-        up2_output: torch.Tensor = self.upsample_2(up1_conv_output)
-        up2_conv_output: torch.Tensor = self.post_upsample_conv_layer_2(up2_output)
-        # print("up2_output.shape:", up2_output.shape)  # (8, 1, 2560, 2560)
+        # Step 3a. Semantic Segmentation Super-Resolution (SSSR)
+        segmmask_up_output_0: torch.Tensor = self.segmmask_upsample_0(segformer_output)
+        segmmask_conv_output_0: torch.Tensor = self.segmmask_post_upsample_conv_layer_0(
+            segmmask_up_output_0
+        )
+        # print("segmmask_conv_output_0.shape:", segmmask_conv_output_0.shape)  # (8, 8, 512, 512)
+        segmmask_up_output_1: torch.Tensor = self.segmmask_upsample_1(
+            segmmask_conv_output_0
+        )
+        segmmask_conv_output_1: torch.Tensor = self.segmmask_post_upsample_conv_layer_1(
+            segmmask_up_output_1
+        )
+        # print("segmmask_conv_output_1.shape:", segmmask_conv_output_1.shape)  # (8, 1, 2560, 2560)
 
-        return up2_conv_output
+        # Step 3b. Single Image Super-Resolution (SISR)
+        superres_up_output_0: torch.Tensor = self.superres_upsample_0(segformer_output)
+        superres_conv_output_0: torch.Tensor = self.superres_post_upsample_conv_layer_0(
+            superres_up_output_0
+        )
+        # print("superres_conv_output_0.shape:", superres_conv_output_0.shape)  # (8, 8, 512, 512)
+        superres_up_output_1: torch.Tensor = self.superres_upsample_1(
+            superres_conv_output_0
+        )
+        superres_conv_output_1: torch.Tensor = self.superres_post_upsample_conv_layer_1(
+            superres_up_output_1
+        )
+        # print("superres_conv_output_1.shape:", superres_conv_output_1.shape)  # (8, 1, 2560, 2560)
+
+        return {
+            "segmmask_conv_output_0": segmmask_conv_output_0,  # for FA loss
+            "segmmask_conv_output_1": segmmask_conv_output_1,  # segmentation output
+            "superres_conv_output_0": superres_conv_output_0,  # for FA loss
+            "superres_conv_output_1": superres_conv_output_1,  # super-resolution output
+        }
 
     def training_step(
         self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
@@ -135,22 +170,79 @@ class S2S2Net(pl.LightningModule):
         """
         x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
         y: torch.Tensor = batch["mask"]  # Groundtruth binary mask
+        y_highres: torch.Tensor = batch["hres"]  # High resolution image
+        # y = torch.randn(8, 1, 2560, 2560)
+        # y_highres = torch.randn(8, 4, 2560, 2560)
 
-        y_hat: torch.Tensor = self(x)
+        y_hat: typing.Dict[str, torch.Tensor] = self(x)
 
-        # Calculate loss value to minimize
-        # loss: float = F.binary_cross_entropy_with_logits(input=y_hat, target=y)
-        loss: float = torchvision.ops.sigmoid_focal_loss(
-            inputs=y_hat, targets=y, alpha=0.75, gamma=2, reduction="mean"
+        ## Calculate loss values to minimize
+        def similarity_matrix(f):
+            # f expected shape (Bs, C', H', W')
+            # before computing the relationship of every pair of pixels,
+            # subsample the feature map to its 1/8
+            f = F.interpolate(
+                f, size=(f.shape[2] // 8, f.shape[3] // 8), mode="nearest"
+            )
+            f = f.permute((0, 2, 3, 1))
+            f = torch.reshape(f, (f.shape[0], -1, f.shape[3]))  # shape (Bs, H'xW', C')
+            f_n = torch.linalg.norm(f, ord=None, dim=2).unsqueeze(
+                -1
+            )  # ord=None indicates 2-Norm,
+            # unsqueeze last dimension to broadcast later
+            eps = 1e-8
+            f_norm = f / torch.max(f_n, eps * torch.ones_like(f_n))
+            sim_mt = f_norm @ f_norm.transpose(2, 1)
+            return sim_mt
+
+        # 1: Feature Affinity loss calculation
+        _segmmask_sim_matrix: torch.Tensor = similarity_matrix(
+            f=y_hat["segmmask_conv_output_0"]
         )
+        _superres_sim_matrix: torch.Tensor = similarity_matrix(
+            f=y_hat["superres_conv_output_0"]
+        )
+        _n_elements: int = (
+            _segmmask_sim_matrix.shape[-2] * _segmmask_sim_matrix.shape[-1]
+        )
+        _abs_dist: torch.Tensor = torch.abs(_segmmask_sim_matrix - _superres_sim_matrix)
+        feature_affinity_loss: torch.Tensor = torch.mean(
+            (1 / _n_elements) * torch.sum(input=_abs_dist, dim=[-2, -1])
+        )
+
+        # 2: Semantic Segmentation loss (Focal Loss)
+        segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
+            inputs=y_hat["segmmask_conv_output_1"],
+            targets=y,
+            alpha=0.75,
+            gamma=2,
+            reduction="mean",
+        )
+        # 3: Super-Resolution loss (Mean Absolute Error)
+        superres_loss: torch.Tensor = torchmetrics.functional.mean_absolute_error(
+            preds=y_hat["superres_conv_output_1"],
+            target=y_highres.to(dtype=torch.float16),
+        )
+
+        # 1 + 2 + 3: Calculate total loss and log to console
+        total_loss: torch.Tensor = (
+            (1.0 * feature_affinity_loss) + segmmask_loss + (0.001 * superres_loss)
+        )
+        losses: typing.Dict[str, torch.Tensor] = {
+            # Component losses (Feature Affinity, Segmentation, Super-Resolution)
+            "loss_feataffy": feature_affinity_loss.detach(),
+            "loss_segmmask": segmmask_loss.detach(),
+            "loss_superres": superres_loss.detach(),
+        }
+        self.log_dict(dictionary=losses, prog_bar=True)
 
         # Calculate metrics to determine how good results are
-        iou_score: torch.Tensor = self.iou(
-            preds=y_hat.squeeze(),
+        iou_score: torch.Tensor = self.iou(  # Intersection over Union
+            preds=y_hat["segmmask_conv_output_1"].squeeze(),
             target=(y > 0.5).squeeze().to(dtype=torch.int8),  # binarize
         )
-        f1_score: torch.Tensor = self.f1_score(
-            preds=y_hat.ravel(),
+        f1_score: torch.Tensor = self.f1_score(  # F1 Score
+            preds=y_hat["segmmask_conv_output_1"].ravel(),
             target=(y > 0.5).ravel().to(dtype=torch.int8),  # binarize
         )
         metrics: typing.Dict[str, torch.Tensor] = {"iou": iou_score, "f1": f1_score}
@@ -166,7 +258,7 @@ class S2S2Net(pl.LightningModule):
                     # epoch=self.current_epoch,
                 )
 
-        return {"loss": loss, **metrics}
+        return total_loss  # {**losses, **metrics}
 
     def predict_step(
         self,
@@ -181,7 +273,10 @@ class S2S2Net(pl.LightningModule):
 
         y_hat: torch.Tensor = self(x)
 
-        return torch.sigmoid(input=y_hat)
+        return (
+            torch.sigmoid(input=y_hat["segmmask_conv_output_1"]),
+            y_hat["superres_conv_output_1"],
+        )
 
     def configure_optimizers(self):
         """
@@ -394,7 +489,8 @@ def cli_main():
     # torch.use_deterministic_algorithms(True, warn_only=True)
     trainer: pl.Trainer = pl.Trainer(
         # deterministic=True,
-        gpus=1,
+        gpus=2,
+        strategy=pl.plugins.DDPPlugin(find_unused_parameters=False),
         logger=tensorboard_logger,
         max_epochs=27,
         precision=16,
