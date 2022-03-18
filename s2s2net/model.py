@@ -162,11 +162,29 @@ class S2S2Net(pl.LightningModule):
             "superres_conv_output_1": superres_conv_output_1,  # super-resolution output
         }
 
-    def training_step(
-        self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
-    ) -> dict:
+    def evaluate(
+        self, batch: typing.Dict[str, torch.Tensor]
+    ) -> typing.Dict[str, torch.Tensor]:
         """
-        Logic for the neural network's training loop.
+        Compute the loss for a single batch in the training or validation step.
+
+        For each batch:
+        1. Get the image and corresponding groundtruth label from each batch
+        2. Pass the image through the neural network to get a predicted label
+        3. Calculate the loss between the predicted label and groundtruth label
+
+        Returns
+        -------
+        loss_and_metrics : dict
+            A dictionary containing the total loss, 3 of the unweighted loss
+            values making up the total loss, and 2 metrics. These include:
+
+            - loss (Total loss)
+            - loss_feataffy (Feature Affinity loss)
+            - loss_segmmask (Segmentation loss)
+            - loss_superres (Super-Resolution loss)
+            - iou (Intersection over Union)
+            - f1 (F1 score)
         """
         x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
         y: torch.Tensor = batch["mask"]  # Groundtruth binary mask
@@ -234,7 +252,6 @@ class S2S2Net(pl.LightningModule):
             "loss_segmmask": segmmask_loss.detach(),
             "loss_superres": superres_loss.detach(),
         }
-        self.log_dict(dictionary=losses, prog_bar=True)
 
         # Calculate metrics to determine how good results are
         iou_score: torch.Tensor = self.iou(  # Intersection over Union
@@ -246,19 +263,59 @@ class S2S2Net(pl.LightningModule):
             target=(y > 0.5).ravel().to(dtype=torch.int8),  # binarize
         )
         metrics: typing.Dict[str, torch.Tensor] = {"iou": iou_score, "f1": f1_score}
-        self.log_dict(dictionary=metrics, prog_bar=True)
+
+        return {"loss": total_loss, **losses, **metrics}
+
+    def training_step(
+        self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Logic for the neural network's training loop.
+        """
+        losses_and_metrics: dict = self.evaluate(batch=batch)
+
+        self.log_dict(dictionary=losses_and_metrics, prog_bar=True)
 
         # Log training loss and metrics to Tensorboard
         if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
-            for metric_name, metric_value in metrics.items():
-                self.logger.experiment.add_scalar(
-                    tag=metric_name,
-                    scalar_value=metric_value,
+            for metric_name, metric_value in losses_and_metrics.items():
+                self.logger.experiment.add_scalars(
+                    main_tag=metric_name,
+                    tag_scalar_dict={"train": metric_value},
                     global_step=self.global_step,
                     # epoch=self.current_epoch,
                 )
 
-        return total_loss  # {**losses, **metrics}
+        return losses_and_metrics["loss"]
+
+    def validation_step(
+        self,
+        batch: typing.Tuple[typing.List[torch.Tensor], typing.List[typing.Dict]],
+        batch_idx: int,
+    ) -> torch.Tensor:
+        """
+        Logic for the neural network's validation loop.
+        """
+        val_losses_and_metrics: dict = self.evaluate(batch=batch)
+
+        self.log_dict(
+            dictionary={
+                f"val_{key}": value for key, value in val_losses_and_metrics.items()
+            },
+            prog_bar=True,
+        )
+
+        # Log validation loss and metrics to Tensorboard
+        if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
+            for metric_name, metric_value in val_losses_and_metrics.items():
+                self.logger.experiment.add_scalars(
+                    main_tag=metric_name,
+                    tag_scalar_dict={"validation": metric_value},
+                    global_step=self.global_step,
+                    # epoch=self.current_epoch,
+                )
+
+        return val_losses_and_metrics["loss"]
 
     def predict_step(
         self,
@@ -436,8 +493,17 @@ class S2S2DataModule(pl.LightningDataModule):
             dataset=self.dataset_train, batch_size=32, num_workers=4
         )
 
+    def val_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        Loads the data used in the validation loop.
+        Set the validation batch size here too.
+        """
+        # TODO use an independent validation set from different geographic region
+        return torch.utils.data.DataLoader(
+            dataset=self.dataset_val, batch_size=32, num_workers=4
+        )
         # for batch in torch.utils.data.DataLoader(
-        #     dataset=self.dataset_train, batch_size=8
+        #     dataset=self.dataset_val, batch_size=8
         # ):
         #     break
 
