@@ -213,10 +213,15 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
                         ) as highresimg_reprojected,
                     ):
                         # Turn areas with no optical imagery into NaN in the mask too
+                        cond: xr.DataArray = highresimg_reprojected.sum(dim="band") != 0
+                        _highresmask_reprojected = highresmask_reprojected.assign_coords(
+                            # Reassign coords to fix ValueError: zero-size array to reduction
+                            # operation minimum which has no identity. Workaround from
+                            # https://github.com/corteva/rioxarray/issues/298#issuecomment-820559379
+                            {"x": cond.x, "y": cond.y}
+                        )
                         _highresmask_reprojected: xr.DataArray = (
-                            highresmask_reprojected.where(
-                                cond=highresimg_reprojected.sum(dim="band") != 0
-                            )
+                            _highresmask_reprojected.where(cond=cond)
                         )
 
                         # Stack the mask as an extra channel to the RGB-NIR highres image
