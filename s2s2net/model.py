@@ -9,14 +9,24 @@ import glob
 import os
 import typing
 
+try:
+    import cucim
+    import cupy
+except ImportError:
+    pass
+
 import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
+import rasterio
 import rioxarray
+import skimage.exposure
 import torch
 import torchgeo.datasets
 import torchmetrics
 import torchvision.ops
+import tqdm
+import xarray as xr
 from torch.nn import functional as F
 
 
@@ -289,9 +299,7 @@ class S2S2Net(pl.LightningModule):
         return losses_and_metrics["loss"]
 
     def validation_step(
-        self,
-        batch: typing.Tuple[typing.List[torch.Tensor], typing.List[typing.Dict]],
-        batch_idx: int,
+        self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
         """
         Logic for the neural network's validation loop.
@@ -319,21 +327,70 @@ class S2S2Net(pl.LightningModule):
 
     def predict_step(
         self,
-        batch: typing.Dict[str, torch.Tensor],
+        batch: typing.Dict[str, typing.Any],
         batch_idx: int,
         dataloader_idx: typing.Optional[int] = None,
-    ):
+    ) -> typing.Union[  # output depends on whether input has CRS info
+        typing.Tuple[torch.Tensor, torch.Tensor],  # without CRS
+        typing.List[typing.Tuple[xr.DataArray, xr.DataArray]],  # with CRS
+    ]:
         """
         Logic for the neural network's prediction loop.
         """
         x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
 
-        y_hat: torch.Tensor = self(x)
+        # Pass the image through neural network model to get predicted images
+        y_hat: typing.Dict[str, torch.Tensor] = self(x)
+        segmmask: torch.Tensor = torch.sigmoid(input=y_hat["segmmask_conv_output_1"])
+        superres: torch.Tensor = y_hat["superres_conv_output_1"]
+        _, bands, height, width = superres.shape
 
-        return (
-            torch.sigmoid(input=y_hat["segmmask_conv_output_1"]),
-            y_hat["superres_conv_output_1"],
-        )
+        try:
+            # Coordintate Reference System of input image
+            crses: typing.List[rasterio.crs.CRS] = batch["crs"]
+            # Bounding box extent of input image
+            extents: typing.List[rasterio.coords.BoundingBox] = batch["bbox"]
+        except KeyError:  # If input batch sample has no CRS, yield pred images
+            return (segmmask, superres)
+
+        results: list = []
+        for idx in tqdm.trange(0, len(x)):
+            crs: rasterio.crs.CRS = crses[idx]
+            extent: rasterio.coords.BoundingBox = extents[idx]
+
+            # Georeference segmentation result using rioxarray
+            geo_segmmask = xr.DataArray(
+                data=segmmask.squeeze().cpu(),  # TODO don't move to CPU
+                coords=dict(
+                    y=np.linspace(start=extent.top, stop=extent.bottom, num=height),
+                    x=np.linspace(start=extent.left, stop=extent.right, num=width),
+                ),
+                dims=("y", "x"),
+            )
+            _ = geo_segmmask.rio.set_crs(input_crs=crs)
+
+            # Histogram Equalize and Georeference super-resolution result
+            # Note: Use cucim if on GPU, use skimage if on CPU (or GPU out of memory)
+            _superres: cupy.ndarray = 2**8 * cucim.skimage.exposure.equalize_hist(
+                image=cupy.asanyarray(a=superres.squeeze())
+            )
+            # _superres: np.ndarray = 2**8 * skimage.exposure.equalize_hist(
+            #     image=superres.squeeze().cpu().numpy()
+            # )
+            geo_superres = xr.DataArray(
+                data=_superres.get(),
+                coords=dict(
+                    band=[8, 4, 3, 2],
+                    y=np.linspace(start=extent.top, stop=extent.bottom, num=height),
+                    x=np.linspace(start=extent.left, stop=extent.right, num=width),
+                ),
+                dims=("band", "y", "x"),
+            )
+            _ = geo_superres.rio.set_crs(input_crs=crs)
+
+            results.append((geo_segmmask, geo_superres))
+
+        return results
 
     def configure_optimizers(self):
         """
@@ -385,7 +442,11 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         )
         self.ids: list = [int(id) for id, _ in enumerate(os.listdir(path=img_path))]
 
-    def __getitem__(self, index: int = 0) -> typing.Dict[str, torch.Tensor]:
+    def __getitem__(
+        self, index: int = 0
+    ) -> typing.Dict[
+        str, typing.Union[torch.Tensor, rasterio.crs.CRS, rasterio.coords.BoundingBox]
+    ]:
         """
         Return an index within the dataset.
 
@@ -419,8 +480,13 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
             with rioxarray.open_rasterio(filename=filename) as rds:
                 assert rds.ndim == 3  # Channel, Height, Width
                 assert rds.shape[0] == 4  # 4 bands/channels (RGB+NIR)
+                left, bottom, right, top = rds.rio.bounds()
                 sample: dict = {
-                    "image": torch.as_tensor(data=rds.data.astype(np.int16))
+                    "image": torch.as_tensor(data=rds.data.astype(np.int16)),
+                    "crs": rds.rio.crs,
+                    "bbox": rasterio.coords.BoundingBox(
+                        left=left, right=right, bottom=bottom, top=top
+                    ),
                 }
 
         if self.transforms is not None:
@@ -512,7 +578,12 @@ class S2S2DataModule(pl.LightningDataModule):
         Loads the data used in the prediction loop.
         Set the prediction batch size here too.
         """
-        return torch.utils.data.DataLoader(dataset=self.dataset, batch_size=1)
+        return torch.utils.data.DataLoader(
+            dataset=self.dataset,
+            batch_size=1,
+            num_workers=1,
+            collate_fn=torchgeo.datasets.stack_samples,
+        )
 
         # for batch in torch.utils.data.DataLoader(dataset=self.dataset, batch_size=1):
         #     break
