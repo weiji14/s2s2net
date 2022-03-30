@@ -5,9 +5,14 @@ __pycache__/
 
 # Data files and folders
 *.csv
+*.tif
+*.tfw
 *.npy
 
 # Pytorch Lightning checkpoints
 lightning_logs/
 tb_logs/
 *.ckpt
+
+# QGIS project files
+*.qgz
