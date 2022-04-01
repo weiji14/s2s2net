@@ -2,7 +2,9 @@
 import glob
 import os
 
+import geopandas as gpd
 import numpy as np
+import pandas as pd
 import rioxarray
 import tqdm
 
@@ -15,18 +17,21 @@ os.makedirs("SuperResolution/chips/npy/mask", exist_ok=True)
 os.makedirs("SuperResolution/chips/npy/hres", exist_ok=True)
 
 # %%
+# Reserve specific tiles as a test set, and the rest are for training/validation
+tile_gdf: gpd.GeoDataFrame = gpd.read_file(
+    filename="SuperResolution/s2s2net_training_tiles.geojson"
+)
+test_tile_ids = ["0123", "0124", "0125", "0126", "0211", "0223", "0157", "0439"]
+train_tile_gdf = tile_gdf.query(expr="folder_id not in @test_tile_ids")
+
+# %%
 # Main loop to create the image chips that will become the training dataset
 j: int = 0
-for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/aligned"))):
-    sen2_file = glob.glob(f"SuperResolution/aligned/{folder}/S2*.tif")[0]
-    mask_file, hres_file = sorted(
-        glob.glob(f"SuperResolution/aligned/{folder}/*_reprojected.tif")
-    )
-
+for _, row in tqdm.tqdm(iterable=train_tile_gdf.iterrows(), total=len(train_tile_gdf)):
     with (
-        rioxarray.open_rasterio(filename=sen2_file) as ds_sen2,
-        rioxarray.open_rasterio(filename=mask_file) as ds_mask,
-        rioxarray.open_rasterio(filename=hres_file) as ds_hres,
+        rioxarray.open_rasterio(filename=row.sen2_file) as ds_sen2,
+        rioxarray.open_rasterio(filename=row.mask_file) as ds_mask,
+        rioxarray.open_rasterio(filename=row.hres_file) as ds_hres,
     ):
         for x in range(int(ds_sen2.x.min()), int(ds_sen2.x.max()) - 5120, 1280):
             for y in range(int(ds_sen2.y.min()), int(ds_sen2.y.max()) - 5120, 1280):
@@ -34,7 +39,7 @@ for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/aligned"))):
                 crop_ds_sen2 = ds_sen2.rio.clip_box(
                     minx=x, miny=y, maxx=x + 5120 - 10, maxy=y + 5120 - 10
                 )
-                if crop_ds_sen2.shape == (4, 512, 512):  # full size tiles only
+                if crop_ds_sen2.shape == (6, 512, 512):  # full size tiles only
                     crop_ds_mask = ds_mask.rio.clip_box(
                         minx=x, miny=y, maxx=x + 5120 - 2.5, maxy=y + 5120 - 2.5
                     )
