@@ -1,11 +1,15 @@
 import glob
 import os
 
+import dateutil
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pygmt
+import pyproj
 import rasterio
 import rioxarray
+import shapely.geometry
 import tqdm
 import xarray as xr
 
@@ -152,6 +156,15 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
     # Get Sentinel 2 10m and 20m resolution input image(s)
     pathnames: list = hres_s2_dict[maskname]
     for pathname in pathnames:
+        if (
+            os.path.exists(f"SuperResolution/aligned/{j:04d}")
+            and len(os.listdir(f"SuperResolution/aligned/{j:04d}")) == 6
+        ):
+            j += 1
+            continue
+        # else:
+        #     raise ValueError("temp")
+
         with rasterio.Env():
             filenames: list = glob.glob(pathname=pathname)
 
@@ -271,3 +284,44 @@ for maskname in tqdm.tqdm(hres_s2_dict.keys()):
                         )
 
                         j += 1
+
+
+# %%
+# Create index tiles for each aligned GeoTIFF tile
+tile_gdf = gpd.GeoDataFrame()
+for folder in tqdm.tqdm(sorted(os.listdir("SuperResolution/aligned"))):
+    sen2_file: str = glob.glob(f"SuperResolution/aligned/{folder}/S2*.tif")[0]
+    mask_file, hres_file = sorted(
+        glob.glob(f"SuperResolution/aligned/{folder}/*_reprojected.tif")
+    )
+
+    # Extract datetime from Sentinel-2 filename
+    timestr: str = os.path.basename(sen2_file).split("_")[2]
+    isotime: str = dateutil.parser.parse(timestr=timestr).isoformat()
+
+    # TODO include sen2, mask and hres filename in the index geojson file
+    # TODO make an independent test set
+    with rioxarray.open_rasterio(filename=sen2_file) as ds_sen2:
+        geom: shapely.geometry.Polygon = shapely.geometry.box(*ds_sen2.rio.bounds())
+
+        _gdf = gpd.GeoDataFrame(
+            data={
+                "folder_id": [folder],
+                "sen2_time": [isotime],
+                "sen2_file": [sen2_file],
+                "mask_file": [mask_file],
+                "hres_file": [hres_file],
+            },
+            geometry=[geom],
+            crs=ds_sen2.rio.crs,
+        )
+
+        tile_gdf: gpd.GeoDataFrame = pd.concat(
+            objs=[tile_gdf, _gdf.to_crs(crs="EPSG:4326")]
+        )
+        assert tile_gdf.crs.to_epsg() == 4326
+
+tile_gdf.to_file(
+    filename := "SuperResolution/s2s2net_training_tiles.geojson", driver="GeoJSON"
+)
+print(f"Index tiles saved to {filename}")

@@ -14,5 +14,6 @@ lightning_logs/
 tb_logs/
 *.ckpt
 
-# QGIS project files
+# QGIS project and vector files
+*.geojson
 *.qgz
