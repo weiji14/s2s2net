@@ -19,7 +19,7 @@ class RandomDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx: int) -> dict:
         return {
-            "image": torch.randn(4, 512, 512),
+            "image": torch.randn(6, 512, 512),
             "mask": torch.randn(1, 2560, 2560),
             "hres": torch.randn(4, 2560, 2560),
         }
@@ -36,7 +36,7 @@ def test_s2s2net():
     model: pl.LightningModule = s2s2net.model.S2S2Net()
 
     # Training
-    trainer: pl.Trainer = pl.Trainer(fast_dev_run=True)
+    trainer: pl.Trainer = pl.Trainer(accelerator="auto", fast_dev_run=True)
     trainer.fit(model=model, train_dataloaders=dataloader)
 
     # Test inference

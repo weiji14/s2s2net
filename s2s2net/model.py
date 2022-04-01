@@ -62,7 +62,7 @@ class S2S2Net(pl.LightningModule):
         ## Input Module (Encoder/Backbone). Mix Vision Tranformer config from
         # https://github.com/open-mmlab/mmsegmentation/blob/v0.21.1/configs/_base_/models/segformer_mit-b0.py#L6-L20
         self.segformer_backbone = mmseg.models.backbones.MixVisionTransformer(
-            in_channels=4,  # RGB+NIR
+            in_channels=6,  # RGB+NIR+SWIR
             embed_dims=32,
             num_stages=4,
             num_layers=[2, 2, 2, 2],
@@ -417,7 +417,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
     Training dataset for the Sentinel-2 Super Resolution Segmentation model.
 
     There are 3 image triples:
-    1. image - Sentinel-2 RGB-NIR image at 10m resolution (4, 512, 512)
+    1. image - Sentinel-2 RGB-NIR-SWIR image at 10m resolution (6, 512, 512)
     2. mask - Binary segmentation mask at 2m resolution (1, 2560, 2560)
     3. hres - High resolution RGB-NIR image at 2m resolution (4, 2560, 2560)
     """
@@ -479,7 +479,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
             )[0]
             with rioxarray.open_rasterio(filename=filename) as rds:
                 assert rds.ndim == 3  # Channel, Height, Width
-                assert rds.shape[0] == 4  # 4 bands/channels (RGB+NIR)
+                assert rds.shape[0] == 6  # 6 bands/channels (RGB+NIR+SWIR)
                 left, bottom, right, top = rds.rio.bounds()
                 sample: dict = {
                     "image": torch.as_tensor(data=rds.data.astype(np.int16)),
@@ -621,13 +621,14 @@ def cli_main():
 
     # Training
     # TODO contribute to pytorch lightning so that deterministic="warn" works
-    # Only works in Pytorch 1.11 or 1.12 I think
+    # Only works in Pytorch 1.11+
     # https://github.com/facebookresearch/ReAgent/pull/582/files
-    # torch.use_deterministic_algorithms(True, warn_only=True)
+    torch.use_deterministic_algorithms(mode=True, warn_only=True)
     trainer: pl.Trainer = pl.Trainer(
         # deterministic=True,
-        gpus=2,
-        strategy=pl.plugins.DDPPlugin(find_unused_parameters=False),
+        accelerator="auto",
+        devices=2,
+        strategy="ddp_find_unused_parameters_false",
         logger=tensorboard_logger,
         max_epochs=27,
         precision=16,
