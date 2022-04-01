@@ -3,10 +3,10 @@ channels:
   - conda-forge
   - rapidsai
 dependencies:
-  - conda-forge::black=22.1.0
+  - conda-forge::black=22.3.0
   - rapidsai::cucim=22.02.00
   - conda-forge::cudatoolkit=11.3.1
-  - conda-forge::jupyterlab=3.2.9
+  - conda-forge::jupyterlab=3.3.2
   - conda-forge::pandas=1.4.1
   - conda-forge::pip=22.0.3
   - conda-forge::pygmt=0.5.0
