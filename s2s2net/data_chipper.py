@@ -50,16 +50,15 @@ for _, row in tqdm.tqdm(iterable=train_tile_gdf.iterrows(), total=len(train_tile
                     )
                     assert crop_ds_hres.shape == (4, 2560, 2560)
 
-                    # Don't save chips with NaN or 0 only values
-                    if (
-                        np.isnan(crop_ds_sen2.data.min())
-                        or np.isnan(crop_ds_mask.data.min())
-                        or crop_ds_sen2.max() == 0
-                        or crop_ds_mask.max() == 0
-                    ):
-                        continue
-
-                    assert crop_ds_hres.max() != 0
+                    # # Don't save chips with NaN or 0 only values
+                    # if (
+                    #     np.isnan(crop_ds_sen2.data.min())
+                    #     or np.isnan(crop_ds_mask.data.min())
+                    #     or crop_ds_sen2.max() == 0
+                    #     or crop_ds_mask.max() == 0
+                    # ):
+                    #     continue
+                    # assert crop_ds_hres.max() != 0
 
                     # Save as npy file format
                     np.save(

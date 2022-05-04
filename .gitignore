@@ -5,6 +5,7 @@ __pycache__/
 
 # Data files and folders
 *.csv
+*.png
 *.tif
 *.tfw
 *.npy
