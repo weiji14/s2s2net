@@ -33,8 +33,8 @@ for _, row in tqdm.tqdm(iterable=train_tile_gdf.iterrows(), total=len(train_tile
         rioxarray.open_rasterio(filename=row.mask_file) as ds_mask,
         rioxarray.open_rasterio(filename=row.hres_file) as ds_hres,
     ):
-        for x in range(int(ds_sen2.x.min()), int(ds_sen2.x.max()) - 5120, 1280):
-            for y in range(int(ds_sen2.y.min()), int(ds_sen2.y.max()) - 5120, 1280):
+        for x in range(int(ds_sen2.x.min()), int(ds_sen2.x.max()) - 5120, 5120):
+            for y in range(int(ds_sen2.y.min()), int(ds_sen2.y.max()) - 5120, 5120):
 
                 crop_ds_sen2 = ds_sen2.rio.clip_box(
                     minx=x, miny=y, maxx=x + 5120 - 10, maxy=y + 5120 - 10
