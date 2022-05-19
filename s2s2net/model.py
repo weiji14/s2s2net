@@ -173,7 +173,7 @@ class S2S2Net(pl.LightningModule):
         }
 
     def evaluate(
-        self, batch: typing.Dict[str, torch.Tensor]
+        self, batch: typing.Dict[str, torch.Tensor], calc_loss: bool = True
     ) -> typing.Dict[str, torch.Tensor]:
         """
         Compute the loss for a single batch in the training or validation step.
@@ -198,83 +198,98 @@ class S2S2Net(pl.LightningModule):
         """
         x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
         y: torch.Tensor = batch["mask"]  # Groundtruth binary mask
-        y_highres: torch.Tensor = batch["hres"]  # High resolution image
+        if calc_loss:
+            y_highres: torch.Tensor = batch["hres"]  # High resolution image
         # y = torch.randn(8, 1, 2560, 2560)
         # y_highres = torch.randn(8, 4, 2560, 2560)
 
         y_hat: typing.Dict[str, torch.Tensor] = self(x)
 
         ## Calculate loss values to minimize
-        def similarity_matrix(f):
-            # f expected shape (Bs, C', H', W')
-            # before computing the relationship of every pair of pixels,
-            # subsample the feature map to its 1/8
-            f = F.interpolate(
-                f, size=(f.shape[2] // 8, f.shape[3] // 8), mode="nearest"
+        if calc_loss:  # only on training and val step
+
+            def similarity_matrix(f):
+                # f expected shape (Bs, C', H', W')
+                # before computing the relationship of every pair of pixels,
+                # subsample the feature map to its 1/8
+                f = F.interpolate(
+                    f, size=(f.shape[2] // 8, f.shape[3] // 8), mode="nearest"
+                )
+                f = f.permute((0, 2, 3, 1))
+                f = torch.reshape(
+                    f, (f.shape[0], -1, f.shape[3])
+                )  # shape (Bs, H'xW', C')
+                f_n = torch.linalg.norm(f, ord=None, dim=2).unsqueeze(
+                    -1
+                )  # ord=None indicates 2-Norm,
+                # unsqueeze last dimension to broadcast later
+                eps = 1e-8
+                f_norm = f / torch.max(f_n, eps * torch.ones_like(f_n))
+                sim_mt = f_norm @ f_norm.transpose(2, 1)
+                return sim_mt
+
+            # 1: Feature Affinity loss calculation
+            _segmmask_sim_matrix: torch.Tensor = similarity_matrix(
+                f=y_hat["segmmask_conv_output_0"]
             )
-            f = f.permute((0, 2, 3, 1))
-            f = torch.reshape(f, (f.shape[0], -1, f.shape[3]))  # shape (Bs, H'xW', C')
-            f_n = torch.linalg.norm(f, ord=None, dim=2).unsqueeze(
-                -1
-            )  # ord=None indicates 2-Norm,
-            # unsqueeze last dimension to broadcast later
-            eps = 1e-8
-            f_norm = f / torch.max(f_n, eps * torch.ones_like(f_n))
-            sim_mt = f_norm @ f_norm.transpose(2, 1)
-            return sim_mt
+            _superres_sim_matrix: torch.Tensor = similarity_matrix(
+                f=y_hat["superres_conv_output_0"]
+            )
+            _n_elements: int = (
+                _segmmask_sim_matrix.shape[-2] * _segmmask_sim_matrix.shape[-1]
+            )
+            _abs_dist: torch.Tensor = torch.abs(
+                _segmmask_sim_matrix - _superres_sim_matrix
+            )
+            feature_affinity_loss: torch.Tensor = torch.mean(
+                (1 / _n_elements) * torch.sum(input=_abs_dist, dim=[-2, -1])
+            )
 
-        # 1: Feature Affinity loss calculation
-        _segmmask_sim_matrix: torch.Tensor = similarity_matrix(
-            f=y_hat["segmmask_conv_output_0"]
-        )
-        _superres_sim_matrix: torch.Tensor = similarity_matrix(
-            f=y_hat["superres_conv_output_0"]
-        )
-        _n_elements: int = (
-            _segmmask_sim_matrix.shape[-2] * _segmmask_sim_matrix.shape[-1]
-        )
-        _abs_dist: torch.Tensor = torch.abs(_segmmask_sim_matrix - _superres_sim_matrix)
-        feature_affinity_loss: torch.Tensor = torch.mean(
-            (1 / _n_elements) * torch.sum(input=_abs_dist, dim=[-2, -1])
-        )
+            # 2: Semantic Segmentation loss (Focal Loss)
+            segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
+                inputs=y_hat["segmmask_conv_output_1"],
+                targets=y,
+                alpha=0.75,
+                gamma=2,
+                reduction="mean",
+            )
+            # 3: Super-Resolution loss (Mean Absolute Error)
+            superres_loss: torch.Tensor = torchmetrics.functional.mean_absolute_error(
+                preds=y_hat["superres_conv_output_1"],
+                target=y_highres.to(dtype=torch.float16),
+            )
 
-        # 2: Semantic Segmentation loss (Focal Loss)
-        segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
-            inputs=y_hat["segmmask_conv_output_1"],
-            targets=y,
-            alpha=0.75,
-            gamma=2,
-            reduction="mean",
-        )
-        # 3: Super-Resolution loss (Mean Absolute Error)
-        superres_loss: torch.Tensor = torchmetrics.functional.mean_absolute_error(
-            preds=y_hat["superres_conv_output_1"],
-            target=y_highres.to(dtype=torch.float16),
-        )
-
-        # 1 + 2 + 3: Calculate total loss and log to console
-        total_loss: torch.Tensor = (
-            (1.0 * feature_affinity_loss) + segmmask_loss + (0.001 * superres_loss)
-        )
-        losses: typing.Dict[str, torch.Tensor] = {
-            # Component losses (Feature Affinity, Segmentation, Super-Resolution)
-            "loss_feataffy": feature_affinity_loss.detach(),
-            "loss_segmmask": segmmask_loss.detach(),
-            "loss_superres": superres_loss.detach(),
-        }
+            # 1 + 2 + 3: Calculate total loss and log to console
+            total_loss: torch.Tensor = (
+                (1.0 * feature_affinity_loss) + segmmask_loss + (0.001 * superres_loss)
+            )
+            losses: typing.Dict[str, torch.Tensor] = {
+                # Total loss
+                "loss": total_loss,
+                # Component losses (Feature Affinity, Segmentation, Super-Resolution)
+                "loss_feataffy": feature_affinity_loss.detach(),
+                "loss_segmmask": segmmask_loss.detach(),
+                "loss_superres": superres_loss.detach(),
+            }
+        else:  # if calc_loss is False, i.e. only on test step
+            losses: dict = {}
 
         # Calculate metrics to determine how good results are
+        preds = y_hat["segmmask_conv_output_1"]
+        target = (y > 0.5).to(dtype=torch.int8)  # binarize
+        if preds.shape != target.shape:  # resize prediction to target shape
+            preds = F.interpolate(input=preds, size=target.shape[-2:], mode="bilinear")
+            # print(x.shape, preds.shape, target.shape)
+
         iou_score: torch.Tensor = self.iou(  # Intersection over Union
-            preds=y_hat["segmmask_conv_output_1"].squeeze(),
-            target=(y > 0.5).squeeze().to(dtype=torch.int8),  # binarize
+            preds=preds.squeeze(), target=target.squeeze()
         )
         f1_score: torch.Tensor = self.f1_score(  # F1 Score
-            preds=y_hat["segmmask_conv_output_1"].ravel(),
-            target=(y > 0.5).ravel().to(dtype=torch.int8),  # binarize
+            preds=preds.ravel(), target=target.ravel()
         )
         metrics: typing.Dict[str, torch.Tensor] = {"iou": iou_score, "f1": f1_score}
 
-        return {"loss": total_loss, **losses, **metrics}
+        return {**losses, **metrics}
 
     def training_step(
         self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
@@ -392,6 +407,31 @@ class S2S2Net(pl.LightningModule):
 
         return results
 
+    def test_step(
+        self, batch: typing.Dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
+        """
+        Logic for the neural network's test loop.
+        """
+        test_metrics: dict = self.evaluate(batch=batch, calc_loss=False)
+
+        self.log_dict(
+            dictionary={f"test_{key}": value for key, value in test_metrics.items()},
+            prog_bar=True,
+        )
+
+        # Log test metrics to Tensorboard
+        if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
+            for metric_name, metric_value in test_metrics.items():
+                self.logger.experiment.add_scalars(
+                    main_tag=metric_name,
+                    tag_scalar_dict={"test": metric_value},
+                    global_step=self.global_step,
+                    # epoch=self.current_epoch,
+                )
+
+        return test_metrics["f1"]
+
     def configure_optimizers(self):
         """
         Optimizing function used to reduce the loss, so that the predicted
@@ -432,6 +472,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
                 [typing.Dict[str, torch.Tensor]], typing.Dict[str, torch.Tensor]
             ]
         ] = None,
+        ids: typing.Optional[typing.List[str]] = None,
     ):
         self.root: str = root
         self.train: bool = train
@@ -440,7 +481,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         img_path: str = (
             os.path.join(self.root, "image") if self.train else os.path.join(self.root)
         )
-        self.ids: list = [int(id) for id, _ in enumerate(os.listdir(path=img_path))]
+        self.ids: list[str] = ids or [path for path in os.listdir(path=img_path)]
 
     def __getitem__(
         self, index: int = 0
@@ -473,11 +514,10 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
 
             sample: dict = {"image": image, "mask": mask, "hres": hres}
 
-        else:
-            filename: str = glob.glob(
-                os.path.join(self.root, f"{index:04d}", "S2*.tif")
-            )[0]
-            with rioxarray.open_rasterio(filename=filename) as rds:
+        else:  # if self.train is False, i.e. for predict and test dataloader
+            idx: str = self.ids[index]  # e.g. 0123
+            image_filename: str = glob.glob(os.path.join(self.root, idx, "S2*.tif"))[0]
+            with rioxarray.open_rasterio(filename=image_filename) as rds:
                 assert rds.ndim == 3  # Channel, Height, Width
                 assert rds.shape[0] == 6  # 6 bands/channels (RGB+NIR+SWIR)
                 left, bottom, right, top = rds.rio.bounds()
@@ -488,6 +528,23 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
                         left=left, right=right, bottom=bottom, top=top
                     ),
                 }
+
+            # For test dataloader, also need to get mask to compute metrics
+            try:
+                mask_filename: str = glob.glob(
+                    os.path.join(self.root, idx, "*_mask_*.tif")
+                )[0]
+                with rioxarray.open_rasterio(filename=mask_filename) as rds:
+                    assert rds.ndim == 3  # Channel, Height, Width
+                    assert rds.shape[0] == 1  # 1 band/channel
+                    # assert tuple(sample["bbox"]) == rds.rio.bounds()
+                    sample["mask"] = torch.as_tensor(
+                        data=rds.rio.clip_box(*sample["bbox"]).data  # float32
+                    )
+                    assert sample["mask"].shape[1] == sample["image"].shape[1] * 5
+                    assert sample["mask"].shape[2] == sample["image"].shape[2] * 5
+            except IndexError:  # if no mask in directory, don't add to sample
+                pass
 
         if self.transforms is not None:
             sample: typing.Dict[str, torch.Tensor] = self.transforms(sample)
@@ -547,6 +604,17 @@ class S2S2DataModule(pl.LightningDataModule):
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
                 root="SuperResolution/aligned", train=False
             )
+        elif stage == "test":  # Inference on test images
+            self.dataset: torch.utils.data.Dataset = S2S2Dataset(
+                root="SuperResolution/aligned",
+                train=False,
+                ids=["0123", "0124", "0125", "0126", "0211", "0223", "0157", "0439"],
+            )
+        else:
+            raise ValueError(
+                f"Unknown stage: {stage}, "
+                "should be either 'fit', 'predict' or 'test'"
+            )
 
         return self.dataset
 
@@ -564,7 +632,6 @@ class S2S2DataModule(pl.LightningDataModule):
         Loads the data used in the validation loop.
         Set the validation batch size here too.
         """
-        # TODO use an independent validation set from different geographic region
         return torch.utils.data.DataLoader(
             dataset=self.dataset_val, batch_size=32, num_workers=4
         )
@@ -585,7 +652,24 @@ class S2S2DataModule(pl.LightningDataModule):
             collate_fn=torchgeo.datasets.stack_samples,
         )
 
-        # for batch in torch.utils.data.DataLoader(dataset=self.dataset, batch_size=1):
+    def test_dataloader(self) -> torch.utils.data.DataLoader:
+        """
+        Loads the data used in the test loop.
+        Set the test batch size here too.
+        """
+        return torch.utils.data.DataLoader(
+            dataset=self.dataset,
+            batch_size=1,
+            num_workers=1,
+            collate_fn=torchgeo.datasets.stack_samples,
+        )
+
+        # for batch in torch.utils.data.DataLoader(
+        #     dataset=self.dataset,
+        #     batch_size=1,
+        #     num_workers=1,
+        #     collate_fn=torchgeo.datasets.stack_samples,
+        # ):
         #     break
 
 
@@ -633,8 +717,15 @@ def cli_main():
         max_epochs=27,
         precision=16,
     )
-
     trainer.fit(model=model, datamodule=datamodule)
+
+    # Testing
+    trainer: pl.Trainer = pl.Trainer(
+        accelerator="cpu",  # Test images are large, so use CPU memory
+        logger=tensorboard_logger,
+        precision=32,  # layer_norm doesn't work with fp16 on cpu
+    )
+    trainer.test(model=model, datamodule=datamodule)
 
     # Export Model
     trainer.save_checkpoint(filepath="s2s2net.ckpt")
