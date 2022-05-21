@@ -196,7 +196,8 @@ class S2S2Net(pl.LightningModule):
             - iou (Intersection over Union)
             - f1 (F1 score)
         """
-        x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
+        dtype = torch.float16 if self.precision == 16 else torch.float
+        x: torch.Tensor = batch["image"].to(dtype=dtype)  # Input Sentinel-2 image
         y: torch.Tensor = batch["mask"]  # Groundtruth binary mask
         y_highres: torch.Tensor = batch["hres"]  # High resolution image
         # y = torch.randn(8, 1, 2560, 2560)
@@ -627,8 +628,8 @@ def cli_main():
     trainer: pl.Trainer = pl.Trainer(
         # deterministic=True,
         accelerator="auto",
-        devices=2,
-        strategy="ddp_find_unused_parameters_false",
+        devices="auto",
+        strategy="deepspeed_stage_2",
         logger=tensorboard_logger,
         max_epochs=27,
         precision=16,
