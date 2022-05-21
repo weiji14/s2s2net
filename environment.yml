@@ -2,11 +2,13 @@ name: s2s2net
 channels:
   - conda-forge
   - rapidsai
+  - nodefaults
 dependencies:
   - conda-forge::black=22.3.0
   - rapidsai::cucim=22.02.00
   - conda-forge::cudatoolkit=11.3.1
   - conda-forge::geopandas-base=0.10.2
+  - conda-forge::gxx_linux-64=11.2.0
   - conda-forge::jupyterlab=3.3.2
   - conda-forge::pip=22.0.3
   - conda-forge::pygmt=0.5.0
@@ -17,5 +19,6 @@ dependencies:
   - conda-forge::rioxarray=0.10.1
   - conda-forge::torchgeo=0.2.0
   - pip:
+    - deepspeed==0.6.4
     - https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/mmcv_full-1.4.8-cp39-cp39-manylinux1_x86_64.whl
     - mmsegmentation==0.21.1
