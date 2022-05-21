@@ -359,7 +359,7 @@ class S2S2Net(pl.LightningModule):
         y_hat: typing.Dict[str, torch.Tensor] = self(x)
         segmmask: torch.Tensor = torch.sigmoid(input=y_hat["segmmask_conv_output_1"])
         superres: torch.Tensor = y_hat["superres_conv_output_1"]
-        _, bands, height, width = superres.shape
+        _, bands, height, width = segmmask.shape
 
         try:
             # Coordintate Reference System of input image
@@ -721,12 +721,8 @@ def cli_main():
     trainer.fit(model=model, datamodule=datamodule)
 
     # Testing
-    trainer: pl.Trainer = pl.Trainer(
-        accelerator="cpu",  # Test images are large, so use CPU memory
-        logger=tensorboard_logger,
-        precision=32,  # layer_norm doesn't work with fp16 on cpu
-    )
-    trainer.test(model=model, datamodule=datamodule)
+    if trainer.num_devices > 1:
+        trainer.test(model=model, datamodule=datamodule)
 
     # Export Model
     trainer.save_checkpoint(filepath="s2s2net.ckpt")

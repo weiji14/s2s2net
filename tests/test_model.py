@@ -37,7 +37,7 @@ def test_s2s2net():
     model: pl.LightningModule = s2s2net.model.S2S2Net()
 
     # Training
-    trainer: pl.Trainer = pl.Trainer(accelerator="auto", fast_dev_run=True)
+    trainer: pl.Trainer = pl.Trainer(accelerator="auto", devices=1, fast_dev_run=True)
     trainer.fit(model=model, train_dataloaders=dataloader)
 
     # Inference/Prediction
