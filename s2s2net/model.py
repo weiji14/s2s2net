@@ -18,6 +18,7 @@ except ImportError:
 import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
+import pytorch_lightning.utilities.deepspeed
 import rasterio
 import rioxarray
 import skimage.exposure
@@ -669,7 +670,7 @@ class S2S2DataModule(pl.LightningDataModule):
         return torch.utils.data.DataLoader(
             dataset=self.dataset,
             batch_size=1,
-            num_workers=1,
+            num_workers=4,
             collate_fn=torchgeo.datasets.stack_samples,
         )
 
@@ -681,7 +682,7 @@ class S2S2DataModule(pl.LightningDataModule):
         return torch.utils.data.DataLoader(
             dataset=self.dataset,
             batch_size=1,
-            num_workers=1,
+            num_workers=4,
             collate_fn=torchgeo.datasets.stack_samples,
         )
 
@@ -723,6 +724,10 @@ def cli_main():
     tensorboard_logger: pl.loggers.LightningLoggerBase = pl.loggers.TensorBoardLogger(
         save_dir="tb_logs", name="s2s2net"
     )
+    # Setup automatic checkpointing of best model
+    checkpoint_callback = pl.callbacks.ModelCheckpoint(
+        filename="{epoch}-{val_f1:.2f}-{step}", monitor="val_f1", mode="max"
+    )
 
     # Training
     # TODO contribute to pytorch lightning so that deterministic="warn" works
@@ -732,10 +737,11 @@ def cli_main():
     trainer: pl.Trainer = pl.Trainer(
         # deterministic=True,
         accelerator="auto",
+        callbacks=[checkpoint_callback],
         devices="auto",
         strategy="deepspeed_stage_2",
         logger=tensorboard_logger,
-        max_epochs=27,
+        max_epochs=52,
         precision=16,
     )
     trainer.fit(model=model, datamodule=datamodule)
@@ -745,7 +751,15 @@ def cli_main():
         trainer.test(model=model, datamodule=datamodule)
 
     # Export Model
-    trainer.save_checkpoint(filepath="s2s2net.ckpt")
+    # Convert deepspeed checkpoint directory to single checkpoint file
+    # https://pytorch-lightning.readthedocs.io/en/1.6.3/advanced/model_parallel.html#deepspeed-zero-stage-3-single-file
+    # trainer.save_checkpoint(filepath="s2s2net_ckpt")
+    if checkpoint_callback.best_model_path:
+        print(f"Saving {checkpoint_callback.best_model_path} to s2s2net.ckpt")
+        pl.utilities.deepspeed.convert_zero_checkpoint_to_fp32_state_dict(
+            checkpoint_dir=checkpoint_callback.best_model_path,
+            output_file="s2s2net.ckpt",
+        )
 
     print("Done!")
 
