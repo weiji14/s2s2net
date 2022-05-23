@@ -518,34 +518,54 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         else:  # if self.train is False, i.e. for predict and test dataloader
             idx: str = self.ids[index]  # e.g. 0123
             image_filename: str = glob.glob(os.path.join(self.root, idx, "S2*.tif"))[0]
-            with rioxarray.open_rasterio(filename=image_filename) as rds:
-                assert rds.ndim == 3  # Channel, Height, Width
-                assert rds.shape[0] == 6  # 6 bands/channels (RGB+NIR+SWIR)
-                left, bottom, right, top = rds.rio.bounds()
-                sample: dict = {
-                    "image": torch.as_tensor(data=rds.data.astype(np.int16)),
-                    "crs": rds.rio.crs,
-                    "bbox": rasterio.coords.BoundingBox(
-                        left=left, right=right, bottom=bottom, top=top
-                    ),
-                }
+            with rioxarray.open_rasterio(filename=image_filename) as rds_image:
+                assert rds_image.ndim == 3  # Channel, Height, Width
+                assert rds_image.shape[0] == 6  # 6 bands/channels (RGB+NIR+SWIR)
+                image = rds_image
+                sample: dict = {"crs": image.rio.crs}
 
             # For test dataloader, also need to get mask to compute metrics
             try:
                 mask_filename: str = glob.glob(
                     os.path.join(self.root, idx, "*_mask_*.tif")
                 )[0]
-                with rioxarray.open_rasterio(filename=mask_filename) as rds:
-                    assert rds.ndim == 3  # Channel, Height, Width
-                    assert rds.shape[0] == 1  # 1 band/channel
-                    # assert tuple(sample["bbox"]) == rds.rio.bounds()
-                    sample["mask"] = torch.as_tensor(
-                        data=rds.rio.clip_box(*sample["bbox"]).data  # float32
+                with rioxarray.open_rasterio(filename=mask_filename) as rds_mask:
+                    assert rds_mask.ndim == 3  # Channel, Height, Width
+                    assert rds_mask.shape[0] == 1  # 1 band/channel
+
+                    # Clip to bounding box extent of mask with non-NaN values
+                    # Need to use low-res (10m) extent instead of 2m extent
+                    mask_extent = (
+                        rds_mask.rio.reproject(
+                            dst_crs=image.rio.crs, resolution=image.rio.resolution()
+                        )
+                        .where(
+                            cond=~rds_mask.isnull(),  # keep non-NaN areas
+                            # cond=rds_mask == 1,# keep with-valid-pixel areas
+                            drop=True,
+                        )
+                        .rio.bounds()
                     )
-                    assert sample["mask"].shape[1] == sample["image"].shape[1] * 5
-                    assert sample["mask"].shape[2] == sample["image"].shape[2] * 5
+                    sample["mask"] = torch.as_tensor(
+                        data=rds_mask.rio.clip_box(*mask_extent).data  # float32
+                    )
+
+                # Clip image to match geographical extent of binary mask
+                assert rds_mask.rio.crs == rds_image.rio.crs
+                image = image.rio.clip_box(*mask_extent)
+
             except IndexError:  # if no mask in directory, don't add to sample
                 pass
+
+            left, bottom, right, top = image.rio.bounds()
+            sample["bbox"] = rasterio.coords.BoundingBox(
+                left=left, right=right, bottom=bottom, top=top
+            )
+            sample["image"] = torch.as_tensor(
+                data=image.data.astype(np.int16)  # uint16 to int16
+            )
+            # assert sample["mask"].shape[1] == sample["image"].shape[1] * 5
+            # assert sample["mask"].shape[2] == sample["image"].shape[2] * 5
 
         if self.transforms is not None:
             sample: typing.Dict[str, torch.Tensor] = self.transforms(sample)
