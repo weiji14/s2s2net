@@ -9,7 +9,7 @@ import torch
 
 import s2s2net.model
 
-
+# %%
 class RandomDataset(torch.utils.data.Dataset):
     def __init__(self):
         pass
@@ -25,6 +25,7 @@ class RandomDataset(torch.utils.data.Dataset):
         }
 
 
+# %%
 def test_s2s2net():
     """
     Run a full train, val, test and prediction loop using 1 batch.
@@ -36,11 +37,17 @@ def test_s2s2net():
     model: pl.LightningModule = s2s2net.model.S2S2Net()
 
     # Training
-    trainer: pl.Trainer = pl.Trainer(accelerator="auto", fast_dev_run=True)
+    trainer: pl.Trainer = pl.Trainer(accelerator="auto", devices=1, fast_dev_run=True)
     trainer.fit(model=model, train_dataloaders=dataloader)
 
-    # Test inference
-    predictions = trainer.predict(model=model, dataloaders=dataloader)
+    # Inference/Prediction
+    predictions: list = trainer.predict(model=model, dataloaders=dataloader)
     segmmask, superres = predictions[0]
     assert segmmask.shape == (1, 1, 2560, 2560)
     assert superres.shape == (1, 4, 2560, 2560)
+
+    # Test/Evaluation
+    scores: list[dict] = trainer.test(model=model, dataloaders=dataloader)
+    assert len(scores[0].keys()) == 2
+    assert scores[0]["test_f1"] >= 0.0
+    assert scores[0]["test_iou"] > 0
