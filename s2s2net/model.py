@@ -354,7 +354,8 @@ class S2S2Net(pl.LightningModule):
         """
         Logic for the neural network's prediction loop.
         """
-        x: torch.Tensor = batch["image"].float()  # Input Sentinel-2 image
+        dtype = torch.float16 if self.precision == 16 else torch.float
+        x: torch.Tensor = batch["image"].to(dtype=dtype)  # Input Sentinel-2 image
 
         # Pass the image through neural network model to get predicted images
         y_hat: typing.Dict[str, torch.Tensor] = self(x)
@@ -462,13 +463,30 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
     1. image - Sentinel-2 RGB-NIR-SWIR image at 10m resolution (6, 512, 512)
     2. mask - Binary segmentation mask at 2m resolution (1, 2560, 2560)
     3. hres - High resolution RGB-NIR image at 2m resolution (4, 2560, 2560)
+
+    Parameters
+    ----------
+    root : str
+        Root directory of the satellite datasets.
+    image_set : str (optional)
+        Select the image_set to use, either:
+
+        - 'trainval' - Training/Validation set loaded from npy files
+        - 'predict' - Predict set, load only the Sentinel-2 GeoTIFF
+        - 'test' - Test set, load both Sentinel-2 and binary mask GeoTIFFs
+    transforms : func (optional)
+        A function/transform that takes input sample and its target as entry
+        and returns a transformed version.
+    ids : list[str] (optional)
+        A list of folder ids like ['0123', '0124'] to run inference on
+        (predict/test), ignored if `image_set=='trainval'`.
     """
 
     def __init__(
         self,
         root: str = "SuperResolution/chips/npy",  # Train/Validation chips
         # root: str = "SuperResolution/aligned",  # Inference on actual images
-        train: bool = True,  # Whether to load training set or predict only
+        image_set: str = "trainval",  # Whether to load train/val, predict or test set
         transforms: typing.Optional[
             typing.Callable[
                 [typing.Dict[str, torch.Tensor]], typing.Dict[str, torch.Tensor]
@@ -477,11 +495,13 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         ids: typing.Optional[typing.List[str]] = None,
     ):
         self.root: str = root
-        self.train: bool = train
+        self.image_set: bool = image_set
         self.transforms = transforms
 
         img_path: str = (
-            os.path.join(self.root, "image") if self.train else os.path.join(self.root)
+            os.path.join(self.root, "image")
+            if self.image_set == "trainval"
+            else self.root
         )
         self.ids: list[str] = ids or [path for path in os.listdir(path=img_path)]
 
@@ -499,7 +519,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         Returns:
             data and labels at that index
         """
-        if self.train:
+        if self.image_set == "trainval":
             image: torch.Tensor = torch.from_numpy(
                 np.load(
                     file=os.path.join(self.root, "image", f"SEN2_{index:04d}.npy")
@@ -516,7 +536,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
 
             sample: dict = {"image": image, "mask": mask, "hres": hres}
 
-        else:  # if self.train is False, i.e. for predict and test dataloader
+        elif self.image_set in ["predict", "test"]:
             idx: str = self.ids[index]  # e.g. 0123
             image_filename: str = glob.glob(os.path.join(self.root, idx, "S2*.tif"))[0]
             with rioxarray.open_rasterio(filename=image_filename) as rds_image:
@@ -526,7 +546,7 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
                 sample: dict = {"crs": image.rio.crs}
 
             # For test dataloader, also need to get mask to compute metrics
-            try:
+            if self.image_set == "test":
                 mask_filename: str = glob.glob(
                     os.path.join(self.root, idx, "*_mask_*.tif")
                 )[0]
@@ -555,9 +575,6 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
                 assert rds_mask.rio.crs == rds_image.rio.crs
                 image = image.rio.clip_box(*mask_extent)
 
-            except IndexError:  # if no mask in directory, don't add to sample
-                pass
-
             left, bottom, right, top = image.rio.bounds()
             sample["bbox"] = rasterio.coords.BoundingBox(
                 left=left, right=right, bottom=bottom, top=top
@@ -567,6 +584,11 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
             )
             # assert sample["mask"].shape[1] == sample["image"].shape[1] * 5
             # assert sample["mask"].shape[2] == sample["image"].shape[2] * 5
+        else:
+            raise ValueError(
+                f"Unknown image_set: {self.image_set}, "
+                "should be either 'trainval', 'predict' or 'test'"
+            )
 
         if self.transforms is not None:
             sample: typing.Dict[str, torch.Tensor] = self.transforms(sample)
@@ -592,11 +614,16 @@ class S2S2DataModule(pl.LightningDataModule):
     TODO
     """
 
-    def __init__(self):
+    def __init__(self, ids: typing.Optional[typing.List[str]] = None):
         """
-        TODO
+        Parameters
+        ----------
+        ids : list[str] (optional)
+            A list of folder ids like ['0123', '0124'] to run inference on
+            (predict/test), ignored during model fit (train/val) stage.
         """
         super().__init__()
+        self.ids: list[str] = ids
 
     def prepare_data(self):
         """
@@ -612,7 +639,7 @@ class S2S2DataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:  # Training/Validation on chips
             # Combine Sentinel2 and Worldview datasets into one!
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
-                root="SuperResolution/chips/npy", train=True
+                root="SuperResolution/chips/npy", image_set="trainval"
             )
 
             # Training/Validation split (80%/20%)
@@ -624,13 +651,14 @@ class S2S2DataModule(pl.LightningDataModule):
 
         elif stage == "predict":  # Inference on actual images
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
-                root="SuperResolution/aligned", train=False
+                root="SuperResolution/aligned", image_set=stage, ids=self.ids
             )
         elif stage == "test":  # Inference on test images
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
                 root="SuperResolution/aligned",
-                train=False,
-                ids=["0123", "0124", "0125", "0126", "0211", "0223", "0157", "0439"],
+                image_set=stage,
+                ids=["0123", "0124", "0125", "0126", "0211", "0223", "0157", "0439"]
+                or self.ids,
             )
         else:
             raise ValueError(
