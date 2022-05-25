@@ -20,5 +20,5 @@ dependencies:
   - conda-forge::torchgeo=0.2.0
   - pip:
     - deepspeed==0.6.4
-    - https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/mmcv_full-1.4.8-cp39-cp39-manylinux1_x86_64.whl
-    - mmsegmentation==0.21.1
+    - https://download.openmmlab.com/mmcv/dist/cu113/torch1.11.0/mmcv_full-1.5.1-cp39-cp39-manylinux1_x86_64.whl
+    - mmsegmentation==0.24.1
