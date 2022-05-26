@@ -9,12 +9,6 @@ import glob
 import os
 import typing
 
-try:
-    import cucim
-    import cupy
-except ImportError:
-    pass
-
 import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
@@ -102,15 +96,6 @@ class S2S2Net(pl.LightningModule):
             in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
         )
 
-        self.superres_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
-        self.superres_post_upsample_conv_layer_0 = torch.nn.Conv2d(
-            in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
-        )
-        self.superres_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
-        self.superres_post_upsample_conv_layer_1 = torch.nn.Conv2d(
-            in_channels=8, out_channels=4, kernel_size=3, stride=1, padding=1
-        )
-
         # Evaluation metrics to know how good the segmentation results are
         self.iou = torchmetrics.JaccardIndex(num_classes=2)
         self.f1_score = torchmetrics.F1Score(num_classes=1)
@@ -152,26 +137,7 @@ class S2S2Net(pl.LightningModule):
         )
         # print("segmmask_conv_output_1.shape:", segmmask_conv_output_1.shape)  # (8, 1, 2560, 2560)
 
-        # Step 3b. Single Image Super-Resolution (SISR)
-        superres_up_output_0: torch.Tensor = self.superres_upsample_0(segformer_output)
-        superres_conv_output_0: torch.Tensor = self.superres_post_upsample_conv_layer_0(
-            superres_up_output_0
-        )
-        # print("superres_conv_output_0.shape:", superres_conv_output_0.shape)  # (8, 8, 512, 512)
-        superres_up_output_1: torch.Tensor = self.superres_upsample_1(
-            superres_conv_output_0
-        )
-        superres_conv_output_1: torch.Tensor = self.superres_post_upsample_conv_layer_1(
-            superres_up_output_1
-        )
-        # print("superres_conv_output_1.shape:", superres_conv_output_1.shape)  # (8, 1, 2560, 2560)
-
-        return {
-            "segmmask_conv_output_0": segmmask_conv_output_0,  # for FA loss
-            "segmmask_conv_output_1": segmmask_conv_output_1,  # segmentation output
-            "superres_conv_output_0": superres_conv_output_0,  # for FA loss
-            "superres_conv_output_1": superres_conv_output_1,  # super-resolution output
-        }
+        return segmmask_conv_output_1
 
     def evaluate(
         self, batch: typing.Dict[str, torch.Tensor], calc_loss: bool = True
@@ -209,75 +175,24 @@ class S2S2Net(pl.LightningModule):
 
         ## Calculate loss values to minimize
         if calc_loss:  # only on training and val step
-
-            def similarity_matrix(f):
-                # f expected shape (Bs, C', H', W')
-                # before computing the relationship of every pair of pixels,
-                # subsample the feature map to its 1/8
-                f = F.interpolate(
-                    f, size=(f.shape[2] // 8, f.shape[3] // 8), mode="nearest"
-                )
-                f = f.permute((0, 2, 3, 1))
-                f = torch.reshape(
-                    f, (f.shape[0], -1, f.shape[3])
-                )  # shape (Bs, H'xW', C')
-                f_n = torch.linalg.norm(f, ord=None, dim=2).unsqueeze(
-                    -1
-                )  # ord=None indicates 2-Norm,
-                # unsqueeze last dimension to broadcast later
-                eps = 1e-8
-                f_norm = f / torch.max(f_n, eps * torch.ones_like(f_n))
-                sim_mt = f_norm @ f_norm.transpose(2, 1)
-                return sim_mt
-
-            # 1: Feature Affinity loss calculation
-            _segmmask_sim_matrix: torch.Tensor = similarity_matrix(
-                f=y_hat["segmmask_conv_output_0"]
-            )
-            _superres_sim_matrix: torch.Tensor = similarity_matrix(
-                f=y_hat["superres_conv_output_0"]
-            )
-            _n_elements: int = (
-                _segmmask_sim_matrix.shape[-2] * _segmmask_sim_matrix.shape[-1]
-            )
-            _abs_dist: torch.Tensor = torch.abs(
-                _segmmask_sim_matrix - _superres_sim_matrix
-            )
-            feature_affinity_loss: torch.Tensor = torch.mean(
-                (1 / _n_elements) * torch.sum(input=_abs_dist, dim=[-2, -1])
-            )
-
-            # 2: Semantic Segmentation loss (Focal Loss)
+            # 1: Semantic Segmentation loss (Focal Loss)
             segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
-                inputs=y_hat["segmmask_conv_output_1"],
-                targets=y,
-                alpha=0.75,
-                gamma=2,
-                reduction="mean",
-            )
-            # 3: Super-Resolution loss (Mean Absolute Error)
-            superres_loss: torch.Tensor = torchmetrics.functional.mean_absolute_error(
-                preds=y_hat["superres_conv_output_1"],
-                target=y_highres.to(dtype=torch.float16),
+                inputs=y_hat, targets=y, alpha=0.75, gamma=2, reduction="mean"
             )
 
             # 1 + 2 + 3: Calculate total loss and log to console
-            total_loss: torch.Tensor = (
-                (1.0 * feature_affinity_loss) + segmmask_loss + (0.001 * superres_loss)
-            )
+            total_loss: torch.Tensor = segmmask_loss
             losses: typing.Dict[str, torch.Tensor] = {
                 # Total loss
                 "loss": total_loss,
-                # Component losses (Feature Affinity, Segmentation, Super-Resolution)
-                "loss_feataffy": feature_affinity_loss.detach(),
+                # Component losses (Segmentation, etc)
                 "loss_segmmask": segmmask_loss.detach(),
-                "loss_superres": superres_loss.detach(),
             }
         else:  # if calc_loss is False, i.e. only on test step
             losses: dict = {}
 
         # Calculate metrics to determine how good results are
-        preds = y_hat["segmmask_conv_output_1"]
+        preds = y_hat
         target = (y > 0.5).to(dtype=torch.int8)  # binarize
         if preds.shape != target.shape:  # resize prediction to target shape
             preds = F.interpolate(input=preds, size=target.shape[-2:], mode="bilinear")
@@ -359,8 +274,7 @@ class S2S2Net(pl.LightningModule):
 
         # Pass the image through neural network model to get predicted images
         y_hat: typing.Dict[str, torch.Tensor] = self(x)
-        segmmask: torch.Tensor = torch.sigmoid(input=y_hat["segmmask_conv_output_1"])
-        superres: torch.Tensor = y_hat["superres_conv_output_1"]
+        segmmask: torch.Tensor = torch.sigmoid(input=y_hat)
         _, bands, height, width = segmmask.shape
 
         try:
@@ -369,7 +283,7 @@ class S2S2Net(pl.LightningModule):
             # Bounding box extent of input image
             extents: typing.List[rasterio.coords.BoundingBox] = batch["bbox"]
         except KeyError:  # If input batch sample has no CRS, yield pred images
-            return (segmmask, superres)
+            return segmmask
 
         results: list = []
         for idx in tqdm.trange(0, len(x)):
@@ -387,26 +301,7 @@ class S2S2Net(pl.LightningModule):
             )
             _ = geo_segmmask.rio.set_crs(input_crs=crs)
 
-            # Histogram Equalize and Georeference super-resolution result
-            # Note: Use cucim if on GPU, use skimage if on CPU (or GPU out of memory)
-            _superres: cupy.ndarray = 2**8 * cucim.skimage.exposure.equalize_hist(
-                image=cupy.asanyarray(a=superres.squeeze())
-            )
-            # _superres: np.ndarray = 2**8 * skimage.exposure.equalize_hist(
-            #     image=superres.squeeze().cpu().numpy()
-            # )
-            geo_superres = xr.DataArray(
-                data=_superres.get(),
-                coords=dict(
-                    band=[8, 4, 3, 2],
-                    y=np.linspace(start=extent.top, stop=extent.bottom, num=height),
-                    x=np.linspace(start=extent.left, stop=extent.right, num=width),
-                ),
-                dims=("band", "y", "x"),
-            )
-            _ = geo_superres.rio.set_crs(input_crs=crs)
-
-            results.append((geo_segmmask, geo_superres))
+            results.append(geo_segmmask)
 
         return results
 

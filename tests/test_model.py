@@ -42,9 +42,8 @@ def test_s2s2net():
 
     # Inference/Prediction
     predictions: list = trainer.predict(model=model, dataloaders=dataloader)
-    segmmask, superres = predictions[0]
+    segmmask = predictions[0]
     assert segmmask.shape == (1, 1, 2560, 2560)
-    assert superres.shape == (1, 4, 2560, 2560)
 
     # Test/Evaluation
     scores: list[dict] = trainer.test(model=model, dataloaders=dataloader)
