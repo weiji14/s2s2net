@@ -5,6 +5,7 @@ channels:
   - nodefaults
 dependencies:
   - conda-forge::black=22.3.0
+  - conda-forge::codecarbon=2.1.2
   - rapidsai::cucim=22.02.00
   - conda-forge::cudatoolkit=11.3.1
   - conda-forge::geopandas-base=0.10.2
