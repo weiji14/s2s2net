@@ -28,6 +28,7 @@ import torchmetrics
 import torchvision.ops
 import tqdm
 import xarray as xr
+from codecarbon import track_emissions
 from torch.nn import functional as F
 
 
@@ -724,7 +725,7 @@ class S2S2DataModule(pl.LightningDataModule):
 
 
 # %%
-# @track_emissions(project_name="s2s2net")
+@track_emissions(project_name="s2s2net")
 def cli_main():
     """
     Command line interface to run the S2S2Net model. Based on
