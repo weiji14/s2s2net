@@ -15,6 +15,7 @@ import pytorch_lightning as pl
 import pytorch_lightning.utilities.deepspeed
 import rasterio
 import rioxarray
+import segmentation_models_pytorch
 import skimage.exposure
 import torch
 import torchgeo.datasets
@@ -97,6 +98,16 @@ class S2S2Net(pl.LightningModule):
             in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
         )
 
+        # Loss functions
+        self.bce_loss = (
+            segmentation_models_pytorch.losses.soft_bce.SoftBCEWithLogitsLoss(
+                reduction="mean", smooth_factor=0.1
+            )
+        )
+        self.dice_loss = segmentation_models_pytorch.losses.dice.DiceLoss(
+            mode="binary", from_logits=True, smooth=0.1, eps=1e-7
+        )
+
         # Evaluation metrics to know how good the segmentation results are
         self.iou = torchmetrics.JaccardIndex(num_classes=2)
         self.f1_score = torchmetrics.F1Score(num_classes=1)
@@ -109,7 +120,7 @@ class S2S2Net(pl.LightningModule):
         """
         ## Step 1. Pass through SegFormer backbone (Mix Transformer x 4)
         # to get multi-level features F1, F2, F3, F4
-        # x: torch.Tensor = torch.randn(8, 4, 512, 512)
+        # x: torch.Tensor = torch.randn(8, 6, 512, 512)
         mit_output_tensors: typing.List[torch.Tensor] = self.segformer_backbone(x)
         assert len(mit_output_tensors) == 4
         # f1, f2, f3, f4 = mit_output_tensors
@@ -176,18 +187,21 @@ class S2S2Net(pl.LightningModule):
 
         ## Calculate loss values to minimize
         if calc_loss:  # only on training and val step
-            # 1: Semantic Segmentation loss (Focal Loss)
-            segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
-                inputs=y_hat, targets=y, alpha=0.75, gamma=2, reduction="mean"
+            # 1: Binary Cross Entropy loss
+            loss_bce: torch.Tensor = self.bce_loss(y_pred=y_hat, y_true=y)
+            # 2: Dice loss
+            loss_dice: torch.Tensor = self.dice_loss(
+                y_pred=y_hat.to(dtype=torch.float32), y_true=y
             )
 
-            # 1 + 2 + 3: Calculate total loss and log to console
-            total_loss: torch.Tensor = segmmask_loss
+            # 1 + 2: Calculate total loss
+            total_loss: torch.Tensor = loss_bce + loss_dice
             losses: typing.Dict[str, torch.Tensor] = {
                 # Total loss
                 "loss": total_loss,
-                # Component losses (Segmentation, etc)
-                "loss_segmmask": segmmask_loss.detach(),
+                # Component losses (Binary Cross Entropy and Dice)
+                "loss_bce": loss_bce.detach(),
+                "loss_dice": loss_dice.detach(),
             }
         else:  # if calc_loss is False, i.e. only on test step
             losses: dict = {}
@@ -217,7 +231,12 @@ class S2S2Net(pl.LightningModule):
         """
         losses_and_metrics: dict = self.evaluate(batch=batch)
 
-        self.log_dict(dictionary=losses_and_metrics, prog_bar=True)
+        self.log_dict(
+            dictionary={
+                key: val for key, val in losses_and_metrics.items() if key != "loss"
+            },
+            prog_bar=True,
+        )
 
         # Log training loss and metrics to Tensorboard
         if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
@@ -279,7 +298,7 @@ class S2S2Net(pl.LightningModule):
         _, bands, height, width = segmmask.shape
 
         try:
-            # Coordintate Reference System of input image
+            # Coordinate Reference System of input image
             crses: typing.List[rasterio.crs.CRS] = batch["crs"]
             # Bounding box extent of input image
             extents: typing.List[rasterio.coords.BoundingBox] = batch["bbox"]
@@ -663,9 +682,9 @@ def cli_main():
         accelerator="auto",
         callbacks=[checkpoint_callback],
         devices="auto",
-        strategy="deepspeed_stage_2",
+        strategy=pl.strategies.DeepSpeedStrategy(stage=2),
         logger=tensorboard_logger,
-        max_epochs=52,
+        max_steps=1000,
         precision=16,
     )
     trainer.fit(model=model, datamodule=datamodule)
