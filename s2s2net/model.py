@@ -72,6 +72,7 @@ class S2S2Net(pl.LightningModule):
             drop_rate=0.0,
             attn_drop_rate=0.0,
             drop_path_rate=0.1,
+            act_cfg=dict(type="Swish"),
         )
 
         ## Middle Module (Decoder). SegFormer's All-MLP Head config from
@@ -82,8 +83,10 @@ class S2S2Net(pl.LightningModule):
             channels=256,
             dropout_ratio=0.1,
             num_classes=16,  # output sixteen channels
-            # norm_cfg=dict(type="SyncBN", requires_grad=True), # for multi-GPU
+            # norm_cfg=dict(type="SyncBN", requires_grad=True),  # for multi-GPU
             align_corners=False,
+            act_cfg=dict(type="Swish"),
+            loss_decode=[],
         )
 
         ## Upsampling layers (Output). 1st one to get back original image size
@@ -140,9 +143,10 @@ class S2S2Net(pl.LightningModule):
         segmmask_conv_output_0: torch.Tensor = self.segmmask_post_upsample_conv_layer_0(
             segmmask_up_output_0
         )
-        # print("segmmask_conv_output_0.shape:", segmmask_conv_output_0.shape)  # (8, 8, 512, 512)
+        segmmask_activation_output_0: torch.Tensor = F.mish(segmmask_conv_output_0)
+        # print("segmmask_activation_output_0.shape:", segmmask_activation_output_0.shape)  # (8, 8, 512, 512)
         segmmask_up_output_1: torch.Tensor = self.segmmask_upsample_1(
-            segmmask_conv_output_0
+            segmmask_activation_output_0
         )
         segmmask_conv_output_1: torch.Tensor = self.segmmask_post_upsample_conv_layer_1(
             segmmask_up_output_1
