@@ -89,16 +89,26 @@ class S2S2Net(pl.LightningModule):
             loss_decode=[],
         )
 
-        ## Upsampling layers (Output). 1st one to get back original image size
-        # 2nd upsample is to get a super-resolution result. Each of the two
-        # upsample layers are followed by a Convolutional 2D layer.
-        self.segmmask_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
+        ## Upsampling layers (Output).
+        # 1st and 2nd layers are to get back original image size
+        # 3rd and 4th layers are to get 5x super-resolution result
+        # Each of the upsampling layers are followed by a Conv2D layer
+        self.segmmask_upsample_0 = torch.nn.Upsample(scale_factor=2, mode="nearest")
         self.segmmask_post_upsample_conv_layer_0 = torch.nn.Conv2d(
             in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
         )
-        self.segmmask_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.segmmask_upsample_1 = torch.nn.Upsample(scale_factor=2, mode="nearest")
         self.segmmask_post_upsample_conv_layer_1 = torch.nn.Conv2d(
-            in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
+            in_channels=8, out_channels=4, kernel_size=3, stride=1, padding=1
+        )
+
+        self.segmmask_upsample_2 = torch.nn.Upsample(scale_factor=2, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_2 = torch.nn.Conv2d(
+            in_channels=4, out_channels=2, kernel_size=3, stride=1, padding=1
+        )
+        self.segmmask_upsample_3 = torch.nn.Upsample(scale_factor=2.5, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_3 = torch.nn.Conv2d(
+            in_channels=2, out_channels=1, kernel_size=3, stride=1, padding=1
         )
 
         # Loss functions
@@ -144,16 +154,35 @@ class S2S2Net(pl.LightningModule):
             segmmask_up_output_0
         )
         segmmask_activation_output_0: torch.Tensor = F.mish(segmmask_conv_output_0)
-        # print("segmmask_activation_output_0.shape:", segmmask_activation_output_0.shape)  # (8, 8, 512, 512)
+        # print("segmmask_activation_output_0.shape:", segmmask_activation_output_0.shape)  # (8, 8, 256, 256)
+
         segmmask_up_output_1: torch.Tensor = self.segmmask_upsample_1(
             segmmask_activation_output_0
         )
         segmmask_conv_output_1: torch.Tensor = self.segmmask_post_upsample_conv_layer_1(
             segmmask_up_output_1
         )
-        # print("segmmask_conv_output_1.shape:", segmmask_conv_output_1.shape)  # (8, 1, 2560, 2560)
+        segmmask_activation_output_1: torch.Tensor = F.mish(segmmask_conv_output_1)
+        # print("segmmask_activation_output_1.shape:", segmmask_activation_output_1.shape)  # (8, 4, 512, 512)
 
-        return segmmask_conv_output_1
+        segmmask_up_output_2: torch.Tensor = self.segmmask_upsample_2(
+            segmmask_activation_output_1
+        )
+        segmmask_conv_output_2: torch.Tensor = self.segmmask_post_upsample_conv_layer_2(
+            segmmask_up_output_2
+        )
+        segmmask_activation_output_2: torch.Tensor = F.mish(segmmask_conv_output_2)
+        # print("segmmask_activation_output_2.shape:", segmmask_activation_output_2.shape)  # (8, 2, 1024, 1024)
+
+        segmmask_up_output_3: torch.Tensor = self.segmmask_upsample_3(
+            segmmask_activation_output_2
+        )
+        segmmask_conv_output_3: torch.Tensor = self.segmmask_post_upsample_conv_layer_3(
+            segmmask_up_output_3
+        )
+        # print("segmmask_conv_output_3.shape:", segmmask_conv_output_3.shape)  # (8, 1, 2560, 2560)
+
+        return segmmask_conv_output_3
 
     def evaluate(
         self, batch: typing.Dict[str, torch.Tensor], calc_loss: bool = True
