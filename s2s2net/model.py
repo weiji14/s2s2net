@@ -16,11 +16,9 @@ import pytorch_lightning.utilities.deepspeed
 import rasterio
 import rioxarray
 import segmentation_models_pytorch
-import skimage.exposure
 import torch
 import torchgeo.datasets
 import torchmetrics
-import torchvision.ops
 import tqdm
 import xarray as xr
 from codecarbon import track_emissions
