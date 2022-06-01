@@ -9,18 +9,13 @@ import glob
 import os
 import typing
 
-try:
-    import cucim
-    import cupy
-except ImportError:
-    pass
-
 import mmseg.models
 import numpy as np
 import pytorch_lightning as pl
 import pytorch_lightning.utilities.deepspeed
 import rasterio
 import rioxarray
+import segmentation_models_pytorch
 import skimage.exposure
 import torch
 import torchgeo.datasets
@@ -77,6 +72,7 @@ class S2S2Net(pl.LightningModule):
             drop_rate=0.0,
             attn_drop_rate=0.0,
             drop_path_rate=0.1,
+            act_cfg=dict(type="Swish"),
         )
 
         ## Middle Module (Decoder). SegFormer's All-MLP Head config from
@@ -87,29 +83,42 @@ class S2S2Net(pl.LightningModule):
             channels=256,
             dropout_ratio=0.1,
             num_classes=16,  # output sixteen channels
-            # norm_cfg=dict(type="SyncBN", requires_grad=True), # for multi-GPU
+            # norm_cfg=dict(type="SyncBN", requires_grad=True),  # for multi-GPU
             align_corners=False,
+            act_cfg=dict(type="Swish"),
+            loss_decode=[],
         )
 
-        ## Upsampling layers (Output). 1st one to get back original image size
-        # 2nd upsample is to get a super-resolution result. Each of the two
-        # upsample layers are followed by a Convolutional 2D layer.
-        self.segmmask_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
+        ## Upsampling layers (Output).
+        # 1st and 2nd layers are to get back original image size
+        # 3rd and 4th layers are to get 5x super-resolution result
+        # Each of the upsampling layers are followed by a Conv2D layer
+        self.segmmask_upsample_0 = torch.nn.Upsample(scale_factor=2, mode="nearest")
         self.segmmask_post_upsample_conv_layer_0 = torch.nn.Conv2d(
             in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
         )
-        self.segmmask_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
+        self.segmmask_upsample_1 = torch.nn.Upsample(scale_factor=2, mode="nearest")
         self.segmmask_post_upsample_conv_layer_1 = torch.nn.Conv2d(
-            in_channels=8, out_channels=1, kernel_size=3, stride=1, padding=1
+            in_channels=8, out_channels=4, kernel_size=3, stride=1, padding=1
         )
 
-        self.superres_upsample_0 = torch.nn.Upsample(scale_factor=4, mode="nearest")
-        self.superres_post_upsample_conv_layer_0 = torch.nn.Conv2d(
-            in_channels=16, out_channels=8, kernel_size=3, stride=1, padding=1
+        self.segmmask_upsample_2 = torch.nn.Upsample(scale_factor=2, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_2 = torch.nn.Conv2d(
+            in_channels=4, out_channels=2, kernel_size=3, stride=1, padding=1
         )
-        self.superres_upsample_1 = torch.nn.Upsample(scale_factor=5, mode="nearest")
-        self.superres_post_upsample_conv_layer_1 = torch.nn.Conv2d(
-            in_channels=8, out_channels=4, kernel_size=3, stride=1, padding=1
+        self.segmmask_upsample_3 = torch.nn.Upsample(scale_factor=2.5, mode="nearest")
+        self.segmmask_post_upsample_conv_layer_3 = torch.nn.Conv2d(
+            in_channels=2, out_channels=1, kernel_size=3, stride=1, padding=1
+        )
+
+        # Loss functions
+        self.bce_loss = (
+            segmentation_models_pytorch.losses.soft_bce.SoftBCEWithLogitsLoss(
+                reduction="mean", smooth_factor=0.1
+            )
+        )
+        self.dice_loss = segmentation_models_pytorch.losses.dice.DiceLoss(
+            mode="binary", from_logits=True, smooth=0.1, eps=1e-7
         )
 
         # Evaluation metrics to know how good the segmentation results are
@@ -124,7 +133,7 @@ class S2S2Net(pl.LightningModule):
         """
         ## Step 1. Pass through SegFormer backbone (Mix Transformer x 4)
         # to get multi-level features F1, F2, F3, F4
-        # x: torch.Tensor = torch.randn(8, 4, 512, 512)
+        # x: torch.Tensor = torch.randn(8, 6, 512, 512)
         mit_output_tensors: typing.List[torch.Tensor] = self.segformer_backbone(x)
         assert len(mit_output_tensors) == 4
         # f1, f2, f3, f4 = mit_output_tensors
@@ -144,35 +153,36 @@ class S2S2Net(pl.LightningModule):
         segmmask_conv_output_0: torch.Tensor = self.segmmask_post_upsample_conv_layer_0(
             segmmask_up_output_0
         )
-        # print("segmmask_conv_output_0.shape:", segmmask_conv_output_0.shape)  # (8, 8, 512, 512)
+        segmmask_activation_output_0: torch.Tensor = F.mish(segmmask_conv_output_0)
+        # print("segmmask_activation_output_0.shape:", segmmask_activation_output_0.shape)  # (8, 8, 256, 256)
+
         segmmask_up_output_1: torch.Tensor = self.segmmask_upsample_1(
-            segmmask_conv_output_0
+            segmmask_activation_output_0
         )
         segmmask_conv_output_1: torch.Tensor = self.segmmask_post_upsample_conv_layer_1(
             segmmask_up_output_1
         )
-        # print("segmmask_conv_output_1.shape:", segmmask_conv_output_1.shape)  # (8, 1, 2560, 2560)
+        segmmask_activation_output_1: torch.Tensor = F.mish(segmmask_conv_output_1)
+        # print("segmmask_activation_output_1.shape:", segmmask_activation_output_1.shape)  # (8, 4, 512, 512)
 
-        # Step 3b. Single Image Super-Resolution (SISR)
-        superres_up_output_0: torch.Tensor = self.superres_upsample_0(segformer_output)
-        superres_conv_output_0: torch.Tensor = self.superres_post_upsample_conv_layer_0(
-            superres_up_output_0
+        segmmask_up_output_2: torch.Tensor = self.segmmask_upsample_2(
+            segmmask_activation_output_1
         )
-        # print("superres_conv_output_0.shape:", superres_conv_output_0.shape)  # (8, 8, 512, 512)
-        superres_up_output_1: torch.Tensor = self.superres_upsample_1(
-            superres_conv_output_0
+        segmmask_conv_output_2: torch.Tensor = self.segmmask_post_upsample_conv_layer_2(
+            segmmask_up_output_2
         )
-        superres_conv_output_1: torch.Tensor = self.superres_post_upsample_conv_layer_1(
-            superres_up_output_1
-        )
-        # print("superres_conv_output_1.shape:", superres_conv_output_1.shape)  # (8, 1, 2560, 2560)
+        segmmask_activation_output_2: torch.Tensor = F.mish(segmmask_conv_output_2)
+        # print("segmmask_activation_output_2.shape:", segmmask_activation_output_2.shape)  # (8, 2, 1024, 1024)
 
-        return {
-            "segmmask_conv_output_0": segmmask_conv_output_0,  # for FA loss
-            "segmmask_conv_output_1": segmmask_conv_output_1,  # segmentation output
-            "superres_conv_output_0": superres_conv_output_0,  # for FA loss
-            "superres_conv_output_1": superres_conv_output_1,  # super-resolution output
-        }
+        segmmask_up_output_3: torch.Tensor = self.segmmask_upsample_3(
+            segmmask_activation_output_2
+        )
+        segmmask_conv_output_3: torch.Tensor = self.segmmask_post_upsample_conv_layer_3(
+            segmmask_up_output_3
+        )
+        # print("segmmask_conv_output_3.shape:", segmmask_conv_output_3.shape)  # (8, 1, 2560, 2560)
+
+        return segmmask_conv_output_3
 
     def evaluate(
         self, batch: typing.Dict[str, torch.Tensor], calc_loss: bool = True
@@ -210,75 +220,27 @@ class S2S2Net(pl.LightningModule):
 
         ## Calculate loss values to minimize
         if calc_loss:  # only on training and val step
-
-            def similarity_matrix(f):
-                # f expected shape (Bs, C', H', W')
-                # before computing the relationship of every pair of pixels,
-                # subsample the feature map to its 1/8
-                f = F.interpolate(
-                    f, size=(f.shape[2] // 8, f.shape[3] // 8), mode="nearest"
-                )
-                f = f.permute((0, 2, 3, 1))
-                f = torch.reshape(
-                    f, (f.shape[0], -1, f.shape[3])
-                )  # shape (Bs, H'xW', C')
-                f_n = torch.linalg.norm(f, ord=None, dim=2).unsqueeze(
-                    -1
-                )  # ord=None indicates 2-Norm,
-                # unsqueeze last dimension to broadcast later
-                eps = 1e-8
-                f_norm = f / torch.max(f_n, eps * torch.ones_like(f_n))
-                sim_mt = f_norm @ f_norm.transpose(2, 1)
-                return sim_mt
-
-            # 1: Feature Affinity loss calculation
-            _segmmask_sim_matrix: torch.Tensor = similarity_matrix(
-                f=y_hat["segmmask_conv_output_0"]
-            )
-            _superres_sim_matrix: torch.Tensor = similarity_matrix(
-                f=y_hat["superres_conv_output_0"]
-            )
-            _n_elements: int = (
-                _segmmask_sim_matrix.shape[-2] * _segmmask_sim_matrix.shape[-1]
-            )
-            _abs_dist: torch.Tensor = torch.abs(
-                _segmmask_sim_matrix - _superres_sim_matrix
-            )
-            feature_affinity_loss: torch.Tensor = torch.mean(
-                (1 / _n_elements) * torch.sum(input=_abs_dist, dim=[-2, -1])
+            # 1: Binary Cross Entropy loss
+            loss_bce: torch.Tensor = self.bce_loss(y_pred=y_hat, y_true=y)
+            # 2: Dice loss
+            loss_dice: torch.Tensor = self.dice_loss(
+                y_pred=y_hat.to(dtype=torch.float32), y_true=y
             )
 
-            # 2: Semantic Segmentation loss (Focal Loss)
-            segmmask_loss: torch.Tensor = torchvision.ops.sigmoid_focal_loss(
-                inputs=y_hat["segmmask_conv_output_1"],
-                targets=y,
-                alpha=0.75,
-                gamma=2,
-                reduction="mean",
-            )
-            # 3: Super-Resolution loss (Mean Absolute Error)
-            superres_loss: torch.Tensor = torchmetrics.functional.mean_absolute_error(
-                preds=y_hat["superres_conv_output_1"],
-                target=y_highres.to(dtype=torch.float16),
-            )
-
-            # 1 + 2 + 3: Calculate total loss and log to console
-            total_loss: torch.Tensor = (
-                (1.0 * feature_affinity_loss) + segmmask_loss + (0.001 * superres_loss)
-            )
+            # 1 + 2: Calculate total loss
+            total_loss: torch.Tensor = loss_bce + loss_dice
             losses: typing.Dict[str, torch.Tensor] = {
                 # Total loss
                 "loss": total_loss,
-                # Component losses (Feature Affinity, Segmentation, Super-Resolution)
-                "loss_feataffy": feature_affinity_loss.detach(),
-                "loss_segmmask": segmmask_loss.detach(),
-                "loss_superres": superres_loss.detach(),
+                # Component losses (Binary Cross Entropy and Dice)
+                "loss_bce": loss_bce.detach(),
+                "loss_dice": loss_dice.detach(),
             }
         else:  # if calc_loss is False, i.e. only on test step
             losses: dict = {}
 
         # Calculate metrics to determine how good results are
-        preds = y_hat["segmmask_conv_output_1"]
+        preds = y_hat
         target = (y > 0.5).to(dtype=torch.int8)  # binarize
         if preds.shape != target.shape:  # resize prediction to target shape
             preds = F.interpolate(input=preds, size=target.shape[-2:], mode="bilinear")
@@ -302,7 +264,12 @@ class S2S2Net(pl.LightningModule):
         """
         losses_and_metrics: dict = self.evaluate(batch=batch)
 
-        self.log_dict(dictionary=losses_and_metrics, prog_bar=True)
+        self.log_dict(
+            dictionary={
+                key: val for key, val in losses_and_metrics.items() if key != "loss"
+            },
+            prog_bar=True,
+        )
 
         # Log training loss and metrics to Tensorboard
         if self.logger is not None and hasattr(self.logger.experiment, "add_scalars"):
@@ -360,17 +327,16 @@ class S2S2Net(pl.LightningModule):
 
         # Pass the image through neural network model to get predicted images
         y_hat: typing.Dict[str, torch.Tensor] = self(x)
-        segmmask: torch.Tensor = torch.sigmoid(input=y_hat["segmmask_conv_output_1"])
-        superres: torch.Tensor = y_hat["superres_conv_output_1"]
+        segmmask: torch.Tensor = torch.sigmoid(input=y_hat)
         _, bands, height, width = segmmask.shape
 
         try:
-            # Coordintate Reference System of input image
+            # Coordinate Reference System of input image
             crses: typing.List[rasterio.crs.CRS] = batch["crs"]
             # Bounding box extent of input image
             extents: typing.List[rasterio.coords.BoundingBox] = batch["bbox"]
         except KeyError:  # If input batch sample has no CRS, yield pred images
-            return (segmmask, superres)
+            return segmmask
 
         results: list = []
         for idx in tqdm.trange(0, len(x)):
@@ -388,26 +354,7 @@ class S2S2Net(pl.LightningModule):
             )
             _ = geo_segmmask.rio.set_crs(input_crs=crs)
 
-            # Histogram Equalize and Georeference super-resolution result
-            # Note: Use cucim if on GPU, use skimage if on CPU (or GPU out of memory)
-            _superres: cupy.ndarray = 2**8 * cucim.skimage.exposure.equalize_hist(
-                image=cupy.asanyarray(a=superres.squeeze())
-            )
-            # _superres: np.ndarray = 2**8 * skimage.exposure.equalize_hist(
-            #     image=superres.squeeze().cpu().numpy()
-            # )
-            geo_superres = xr.DataArray(
-                data=_superres.get(),
-                coords=dict(
-                    band=[8, 4, 3, 2],
-                    y=np.linspace(start=extent.top, stop=extent.bottom, num=height),
-                    x=np.linspace(start=extent.left, stop=extent.right, num=width),
-                ),
-                dims=("band", "y", "x"),
-            )
-            _ = geo_superres.rio.set_crs(input_crs=crs)
-
-            results.append((geo_segmmask, geo_superres))
+            results.append(geo_segmmask)
 
         return results
 
@@ -768,9 +715,9 @@ def cli_main():
         accelerator="auto",
         callbacks=[checkpoint_callback],
         devices="auto",
-        strategy="deepspeed_stage_2",
+        strategy=pl.strategies.DeepSpeedStrategy(stage=2),
         logger=tensorboard_logger,
-        max_epochs=52,
+        max_steps=1000,
         precision=16,
     )
     trainer.fit(model=model, datamodule=datamodule)
