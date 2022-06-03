@@ -9,6 +9,7 @@ __pycache__/
 *.tif
 *.tfw
 *.npy
+*.zip
 
 # Pytorch Lightning checkpoints
 lightning_logs/
