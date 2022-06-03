@@ -424,8 +424,9 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
         A function/transform that takes input sample and its target as entry
         and returns a transformed version.
     ids : list[str] (optional)
-        A list of folder ids like ['0123', '0124'] to run inference on
-        (predict/test), ignored if `image_set=='trainval'`.
+        A list of folder ids like ['0123', '0124'] or GeoTIFF filenames
+        like ['S2A_001.tif', 'S2B_002.tif'] to run inference (predict/test)
+        on, ignored during model fit (train/val) stage.
     """
 
     def __init__(
@@ -484,7 +485,12 @@ class S2S2Dataset(torchgeo.datasets.VisionDataset):
 
         elif self.image_set in ["predict", "test"]:
             idx: str = self.ids[index]  # e.g. 0123
-            image_filename: str = glob.glob(os.path.join(self.root, idx, "S2*.tif"))[0]
+            if idx.endswith(".tif"):
+                image_filename: str = os.path.join(self.root, idx)
+            else:  # if idx is a folder, find the Sentinel-2 GeoTIFF within
+                image_filename: str = glob.glob(
+                    os.path.join(self.root, idx, "S2*.tif")
+                )[0]
             with rioxarray.open_rasterio(filename=image_filename) as rds_image:
                 assert rds_image.ndim == 3  # Channel, Height, Width
                 assert rds_image.shape[0] == 6  # 6 bands/channels (RGB+NIR+SWIR)
@@ -560,15 +566,23 @@ class S2S2DataModule(pl.LightningDataModule):
     TODO
     """
 
-    def __init__(self, ids: typing.Optional[typing.List[str]] = None):
+    def __init__(
+        self,
+        root: typing.Optional[str] = None,
+        ids: typing.Optional[typing.List[str]] = None,
+    ):
         """
         Parameters
         ----------
+        root : str
+            Root directory of the satellite datasets.
         ids : list[str] (optional)
-            A list of folder ids like ['0123', '0124'] to run inference on
-            (predict/test), ignored during model fit (train/val) stage.
+            A list of folder ids like ['0123', '0124'] or GeoTIFF filenames
+            like ['S2A_001.tif', 'S2B_002.tif'] to run inference (predict/test)
+            on, ignored during model fit (train/val) stage.
         """
         super().__init__()
+        self.root: str = root
         self.ids: list[str] = ids
 
     def prepare_data(self):
@@ -585,7 +599,9 @@ class S2S2DataModule(pl.LightningDataModule):
         if stage == "fit" or stage is None:  # Training/Validation on chips
             # Combine Sentinel2 and Worldview datasets into one!
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
-                root="SuperResolution/chips/npy", image_set="trainval"
+                # root="SuperResolution/chips/npy",
+                root=self.root or "SuperResolution/chips/npy_6band_nonan",
+                image_set="trainval",
             )
 
             # Training/Validation split (80%/20%)
@@ -597,11 +613,13 @@ class S2S2DataModule(pl.LightningDataModule):
 
         elif stage == "predict":  # Inference on actual images
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
-                root="SuperResolution/aligned", image_set=stage, ids=self.ids
+                root=self.root or "SuperResolution/aligned",
+                image_set=stage,
+                ids=self.ids,
             )
         elif stage == "test":  # Inference on test images
             self.dataset: torch.utils.data.Dataset = S2S2Dataset(
-                root="SuperResolution/aligned",
+                root=self.root or "SuperResolution/aligned",
                 image_set=stage,
                 ids=["0123", "0124", "0125", "0126", "0211", "0223", "0157", "0439"]
                 or self.ids,
